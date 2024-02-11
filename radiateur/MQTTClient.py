@@ -1,11 +1,12 @@
 import paho.mqtt.client as mqtt
+import time
 
 class MQTTClient:
 
     def __init__(self, broker_address, broker_port=1883):
         self.client = mqtt.Client()
         self.client.connect(broker_address, broker_port)
-        self.message_recu = None
+        self.message_recu = []
 
     def publish(self, message, topic):
         self.client.publish(topic, message)
@@ -16,7 +17,7 @@ class MQTTClient:
         self.client.loop_start()
 
     def on_message(self, client, userdata, message):
-        self.message_recu = message.payload.decode('utf-8')
+        self.message_recu.append((time.time(), message.payload.decode("utf-8")))
 
     def unsubscribe(self):
         self.client.loop_stop()

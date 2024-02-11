@@ -15,8 +15,7 @@ from .fonction import *
 from .MQTTClient import MQTTClient
 from .parametres import IP_MQTT, TOPIC_MQTT, LISTE_RADIATEUR
 
-
-global mqtt_client
+global mqtt_client, liste_etat
 
 
 @csrf_exempt
@@ -70,52 +69,9 @@ def changement_etat(request):
 
 @csrf_exempt
 def retourner_etat(request):
-    # global message_recu
-    etat = {
-        "Chambre" : "None",
-        "Cuisine" : "None",
-    }
-    etat_images = {
-        "ECO": "static/img/logo_eco.webp",
-        "CONFORT": "static/img/logo_confort.webp",
-        "ERROR": "static/img/logo_erreur.webp",
-        "HORS_GEL": "static/img/logo_hors_gel.webp",
-        "OFF": "static/img/logo_off.webp",
-    }
-
-    for appareil in LISTE_RADIATEUR:
-
-        message = {
-            "FROM": "Django",
-            "TO": appareil,
-            "COMMAND": "STATE"
-        }
-        mqtt_client.publish(str(message), TOPIC_MQTT)
-
-        mqtt_client.subscribe(TOPIC_MQTT)
-
-        run = True
-        start_time = time.time()
-        while run:
-            message_recu = mqtt_client.get_message_recu()
-            if message_recu:
-                mqtt_client.reset_message_recu()
-                message_recu = ast.literal_eval(message_recu)
-                if message_recu["FROM"] == appareil:
-                    etat[appareil] = message_recu["COMMAND"]
-                    mqtt_client.unsubscribe()
-                    break
-
-                message_recu = None
-
-            if time.time() - start_time > 1:
-                etat[appareil] = "ERROR"
-                break
-
-            time.sleep(0.01)
-
-    print(etat)
-    return JsonResponse(etat)
+    global mqtt_client
+    demander_etat_au_appareil(mqtt_client)
+    return JsonResponse(liste_etat)
 
 @csrf_exempt
 def get_image_url(request):
@@ -127,9 +83,19 @@ def get_image_url(request):
     return HttpResponse(image_data, content_type=content_type)
 
 
+# Création de la liste des état
+liste_etat = {}
+for radiateur in LISTE_RADIATEUR:
+    liste_etat[radiateur] = "DEFAULT"
+# Envoie de cette liste au programme fonction.py
+set_liste_etat(liste_etat)
+
 # Client MQTTT pour envoyer les requetes
 mqtt_client = MQTTClient(IP_MQTT)
+mqtt_client.subscribe(TOPIC_MQTT)
 
 # Thread pour mettre suivre les instructions du planning
 t = threading.Thread(target=maj_etat_selon_planning, args=(mqtt_client,)).start()
-# t.start()
+
+# Thread pour mettre à jour les états
+thread_etat = threading.Thread(target=boucle_demander_etat_appareil, args=(mqtt_client,)).start()
