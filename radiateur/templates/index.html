@@ -1,0 +1,181 @@
+{% load static %}
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Contrôle Domotique</title>
+    <!-- Mobiscroll JS and CSS Includes -->
+    <link rel="stylesheet" href="{% static "css/mobiscroll.javascript.min.css" %}">
+    <script src="{% static "js/mobiscroll.javascript.min.js" %}"></script>
+
+    <link rel="stylesheet" href="{% static "css/index.css" %}">
+
+</head>
+<body>
+<div id="image_cache_COMFORT" data-image-url="{% static 'img/logo_confort.webp' %}" style="display: none;"></div>
+<div id="image_cache_ECO" data-image-url="{% static 'img/logo_eco.webp' %}" style="display: none;"></div>
+<div id="image_cache_None" data-image-url="{% static 'img/logo_erreur.webp' %}" style="display: none;"></div>
+<div id="image_cache_ERROR" data-image-url="{% static 'img/logo_erreur.webp' %}" style="display: none;"></div>
+<div id="image_cache_HORS GEL" data-image-url="{% static 'img/logo_hors_gel.webp' %}" style="display: none;"></div>
+<div id="image_cache_OFF" data-image-url="{% static 'img/logo_off.webp' %}" style="display: none;"></div>
+
+<h1>Contrôle Domotique</h1>
+
+<!-- Buttons are streched to fill the full width of the container.-->
+<div class="mbsc-button-group-justified">
+    <button id="boutonPlanning"  mbsc-button data-theme="ios" data-color="info" >Planning</button>
+    <button id="boutonOption"mbsc-button data-theme="ios" data-color="info"">Options</button>
+</div>
+
+<div mbsc-segmented-group>
+    <label>
+        Confort
+        <input type="radio" mbsc-segmented name="modeSelect" value="COMFORT" onclick="envoyer_etat()">
+    </label>
+    <label>
+        Éco
+        <input type="radio" mbsc-segmented name="modeSelect" value="ECO" onclick="envoyer_etat()">
+    </label>
+</div>
+<div mbsc-segmented-group>
+    <label>
+        Hors Gel
+        <input type="radio" mbsc-segmented name="modeSelect" value="HORSGEL" onclick="envoyer_etat()">
+    </label>
+    <label>
+        Off
+        <input type="radio" mbsc-segmented name="modeSelect" value="OFF" onclick="envoyer_etat()">
+    </label>
+</div>
+
+<div class="mbsc-grid">
+    <div class="mbsc-row">
+        <div class="mbsc-col">
+            Chambre
+        </div>
+        <div class="mbsc-col">
+            <img id="Chambre" src="{% static 'img/logo_erreur.webp' %}" alt="ERREUR">
+        </div>
+    </div>
+    <div class="mbsc-row">
+        <div class="mbsc-col">
+            Cuisine
+        </div>
+        <div class="mbsc-col">
+            <img id="Cuisine" src="{% static 'img/logo_erreur.webp' %}" alt="ERREUR">
+        </div>
+    </div>
+</div>
+
+<div></div>
+
+{# Pour affichage textuel, non utilisé#}
+{#<button mbsc-button data-theme="ios" id="checkerButton">Checker</button>#}
+{#<table>#}
+{#    <tr>#}
+{#        <td>Radiateur chambre</td>#}
+{#        <td><span id="chambreText">DEFAUT</span></td>#}
+{#    </tr>#}
+{#    <tr>#}
+{#        <td>Radiateur cuisine</td>#}
+{#        <td><span id="cuisineText">DEFAUT</span></td>#}
+{#    </tr>#}
+{#</table>#}
+{##}
+
+
+<script>
+    const modeSelect = document.getElementsByName("modeSelect")
+    const envoyerButton = document.getElementById("envoyerButton");
+    const checkerButton = document.getElementById("checkerButton");
+    const reponseServeur = document.getElementById("reponseServeur");
+
+    function demander_etat(){
+
+
+        var xhr = new XMLHttpRequest();
+
+        xhr.open('POST', '/retourner_etat/', true);
+        xhr.setRequestHeader("X-CSRFToken", getCookie("csrftoken"));
+        xhr.responseType = "text"
+
+        xhr.onload = function (){
+            if (xhr.status === 200) { // Vérifiez que la requête s'est bien déroulée (statut HTTP 200 OK)
+                var responseText = xhr.responseText; // Récupérez le texte de la réponse JSON
+                var jsonData = JSON.parse(responseText); // Parsez le texte JSON en objet JavaScript
+
+                // Pour affichage textuel, non utilisé
+                {#document.getElementById("chambreText").innerHTML = jsonData.Chambre;#}
+                {#document.getElementById("cuisineText").innerHTML = jsonData.Cuisine;#}
+                radiateur = ["Chambre", "Cuisine"];
+                for (let item of radiateur) {
+                    etat = jsonData[item];
+                    let emplacement = document.getElementById(item);
+                    console.log('image_cache_' + etat)
+                    var imageUrl = document.getElementById('image_cache_' + etat).getAttribute('data-image-url');
+                    emplacement.src = imageUrl;
+                    if (etat == "ERREUR"){
+                        setTimeout(function() {
+                            demander_etat();
+                        }, 100);
+                    }
+                }
+            }
+        };
+        xhr.send()
+    }
+
+    function envoyer_etat(){
+        selectedMode = "None";
+        modeSelect.forEach((element, index) =>{
+            if (element.checked){
+                selectedMode = element.value
+            }
+        });
+        var data = {
+            mode: selectedMode,
+        };
+
+        var xhr = new XMLHttpRequest();
+
+        xhr.open('POST', '/changement_etat/', true);
+        xhr.setRequestHeader("X-CSRFToken", getCookie("csrftoken"));
+        xhr.responseType = "blob"
+
+        xhr.onload = function (){
+            mobiscroll.toast({
+                message: 'Mode des radiateurs modifié',
+            });
+        };
+        xhr.send(JSON.stringify(data));
+
+        setTimeout(function() {
+            demander_etat();
+        }, 10);
+    }
+
+
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.startsWith(name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+
+    document.getElementById('boutonPlanning').addEventListener('click', function() {
+        window.location.href = '/planning';
+    });
+
+    demander_etat();
+    {#setInterval(demander_etat, 10000);#}
+
+</script>
+</body>
+</html>

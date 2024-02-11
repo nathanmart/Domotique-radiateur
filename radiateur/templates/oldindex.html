@@ -1,0 +1,113 @@
+{% load static %}
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Contrôle Domotique</title>
+</head>
+<body>
+<h1>Contrôle Domotique</h1>
+
+<label for="modeSelect">Sélectionnez un mode :</label>
+<select id="modeSelect">
+    <option value="ECO">Éco</option>
+    <option value="COMFORT">Confort</option>
+    <option value="HORSGEL">Hors Gel</option>
+    <option value="OFF">Off</option>
+    <option value="CLIGNOTER">Clignoter</option>
+</select>
+
+<button id="envoyerButton">Envoyer</button>
+<button id="checkerButton">Checker</button>
+
+<table>
+    <tr>
+        <td>Radiateur chambre</td>
+        <td><span id="chambreText">DEFAUT</span></td>
+    </tr>
+    <tr>
+        <td>Radiateur cuisine</td>
+        <td><span id="cuisineText">DEFAUT</span></td>
+    </tr>
+</table>
+
+<form action="/planning" method="get">
+    <button type="submit" class="btn btn-primary">Planning</button>
+</form>
+
+
+
+
+<script>
+    const modeSelect = document.getElementById("modeSelect");
+    const envoyerButton = document.getElementById("envoyerButton");
+    const checkerButton = document.getElementById("checkerButton");
+    const reponseServeur = document.getElementById("reponseServeur");
+
+    function demander_etat(){
+        var xhr = new XMLHttpRequest();
+
+        xhr.open('POST', '/retourner_etat/', true);
+        xhr.setRequestHeader("X-CSRFToken", getCookie("csrftoken"));
+        xhr.responseType = "text"
+
+        xhr.onload = function (){
+            if (xhr.status === 200) { // Vérifiez que la requête s'est bien déroulée (statut HTTP 200 OK)
+                var responseText = xhr.responseText; // Récupérez le texte de la réponse JSON
+                var jsonData = JSON.parse(responseText); // Parsez le texte JSON en objet JavaScript
+
+                // Maintenant, vous pouvez accéder aux données et les afficher
+                document.getElementById("chambreText").innerHTML = jsonData.Chambre;
+                document.getElementById("cuisineText").innerHTML = jsonData.Cuisine;
+            }
+        };
+        xhr.send()
+    }
+
+    // Fonction pour envoyer la valeur du sélecteur au serveur
+    envoyerButton.addEventListener("click", () => {
+        const selectedMode = modeSelect.value;
+
+        var data = {
+            mode: modeSelect.value,
+        };
+
+        var xhr = new XMLHttpRequest();
+
+        xhr.open('POST', '/changement_etat/', true);
+        xhr.setRequestHeader("X-CSRFToken", getCookie("csrftoken"));
+        xhr.responseType = "blob"
+
+        xhr.onload = function (){
+        };
+        xhr.send(JSON.stringify(data));
+
+        setTimeout(function() {
+            demander_etat();
+        }, 100);
+
+    });
+
+    // Fonction pour envoyer une demande au serveur et afficher la réponse
+    checkerButton.addEventListener("click", () => {
+        demander_etat();
+    });
+
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.startsWith(name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+
+    demander_etat()
+</script>
+</body>
+</html>

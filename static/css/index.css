@@ -1,0 +1,33 @@
+/*Boutons choix de page*/
+.mbsc-button-group-justified button {
+    height: 10vh; /* 30% de la hauteur de la fenêtre de visualisation */
+    font-size: 30px;
+}
+
+/*Bouton choix de mode*/
+div[mbsc-segmented-group] label {
+    height: 10vh;
+    font-size: 5vh;
+}
+
+
+/*Image des états*/
+.mbsc-grid .mbsc-col img {
+    width: 40vw;  /* ou une autre valeur ou pourcentage */
+    height: auto;  /* conserve les proportions de l'image */
+    font-size: 300px;
+}
+/*Texte des états*/
+.mbsc-col{
+    font-size: 6vw;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+h1 {
+    font-size: 6vw;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}

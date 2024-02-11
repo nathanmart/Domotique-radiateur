@@ -1,0 +1,217 @@
+{% load static %}
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <title>
+        Controle radiateur - Planning
+    </title>
+
+    <!-- Mobiscroll JS and CSS Includes -->
+    <link rel="stylesheet" href="{% static "css/mobiscroll.javascript.min.css" %}">
+    <script src="{% static "js/mobiscroll.javascript.min.js" %}"></script>
+
+    <link rel="stylesheet" href="{% static "css/planning.css" %}">
+
+    <style>
+            body {
+        margin: 0;
+        padding: 0;
+    }
+
+    body,
+    html {
+        height: 100%;
+    }
+
+    </style>
+
+</head>
+
+<body>
+    <div id="jsonData" style="display: none;">
+        <!-- Affichage des données JSON -->
+        {{ data|safe }}
+    </div>
+    <div mbsc-page class="demo-responsive-day-week-schedule">
+        <div style="height:100%">
+                <div id="demo"></div>
+        </div>
+    </div>
+
+    <script>
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.startsWith(name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+
+        // Ajout des boutons en haut
+        function ajout_bouton() {
+            var emplacements = document.getElementsByClassName("mbsc-flex mbsc-flex-1-1 mbsc-calendar-title-wrapper mbsc-ios");
+
+            // Créer le div conteneur
+            var div = document.createElement('div');
+            div.className = 'mbsc-button-group-justified';
+
+            // Créer le premier bouton
+            var boutonPlanning = document.createElement('button');
+            boutonPlanning.id = 'boutonManuel';
+            boutonPlanning.setAttribute('mbsc-button', '');
+            boutonPlanning.setAttribute('data-theme', 'ios');
+            boutonPlanning.setAttribute('data-color', 'info');
+            boutonPlanning.setAttribute('data-icon', 'home');
+
+            // Créer le deuxième bouton
+            var boutonOptions = document.createElement('button');
+            boutonOptions.id = "boutonOption"
+            boutonOptions.setAttribute('mbsc-button', '');
+            boutonOptions.setAttribute('data-theme', 'ios');
+            boutonOptions.setAttribute('data-color', 'info');
+            boutonOptions.setAttribute('data-icon', 'cogs');
+
+            // Ajouter les boutons au div
+            div.appendChild(boutonPlanning);
+            div.appendChild(boutonOptions);
+
+            for(var i = 0; i < emplacements.length; i++) {
+                emplacements[i].appendChild(div.cloneNode(true));
+            }
+
+        }
+
+
+        // Envoie au serveur des données mise à jour
+        function envoyer_donnee(event, inst){
+            var donnee = inst.getEvents();
+
+            // Formatage des heures pour éviter les problèmes de décalage horaire
+            donnee = JSON.stringify(donnee, function(key, value) {
+                if (key === 'start' || key === 'end') {
+                    // Convertir la chaîne de date ISO 8601 en objet Date
+                    var date = new Date(value);
+                    // Récupérer les composantes de la date (année, mois, jour, heure, minute, seconde)
+                    var year = date.getFullYear();
+                    var month = ('0' + (date.getMonth() + 1)).slice(-2); // Les mois sont indexés à partir de 0
+                    var day = ('0' + date.getDate()).slice(-2);
+                    var hours = ('0' + date.getHours()).slice(-2);
+                    var minutes = ('0' + date.getMinutes()).slice(-2);
+                    var seconds = ('0' + date.getSeconds()).slice(-2);
+                    // Construire la chaîne de date au format "YYYY-MM-DDTHH:MM:SS"
+                    return year + '-' + month + '-' + day + 'T' + hours + ':' + minutes + ':' + seconds;
+                }
+                return value;
+            });
+            console.log("LES DONNEES MODIFIE SONT");
+            console.log(donnee);
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', '/maj_json', true);
+            xhr.setRequestHeader('X-CSRFToken', getCookie('csrftoken'));
+            xhr.responseType = "blob";
+            xhr.onload = function(){
+                if (this.status === 200){
+                    console.log("Bien envoyé");
+                    mobiscroll.toast({
+                        message: 'Mise à jour bien envoyée au serveur'
+                    });
+                } else{
+                    console.log("Erreur d'envoie: " + str(this.status));
+                    mobiscroll.toast({
+                        message: 'Echecs de l\'envoie de la mise à jour au serveur'
+                    });
+                }
+            };
+            xhr.send(donnee);
+        }
+
+
+        mobiscroll.setOptions({
+            theme: 'ios',
+            locale: mobiscroll.localeFr
+        });
+
+        var inst = mobiscroll.eventcalendar('#demo', {
+            locale: mobiscroll.localeFr,  // Specify language like: locale: mobiscroll.localePl or omit setting to use default
+            theme: 'ios',                 // Specify theme like: theme: 'ios' or omit setting to use default
+            themeVariant: 'light',        // More info about themeVariant: https://docs.mobiscroll.com/5-28-3/javascript/eventcalendar#opt-themeVariant
+            responsive: {                 // More info about responsive: https://docs.mobiscroll.com/5-28-3/javascript/eventcalendar#opt-responsive
+                xsmall: {
+                    view: {               // More info about view: https://docs.mobiscroll.com/5-28-3/javascript/eventcalendar#opt-view
+                        schedule: {
+                            type: 'week',
+                            allDay: false
+                        }
+                    },
+
+                },
+
+            },
+            clickToCreate: true,
+            dragToCreate: true,
+            dragToMove: true,
+            dragToResize: true,
+            dragTimeStep: 30,
+            eventDelete: true,
+            eventOverlap: false,
+            actionableEvents: true,
+            showEventTooltip: true,
+
+            onEventClick: function (event, inst){
+                mobiscroll.confirm({
+                    title: 'Supprimer ?',
+                    message: 'Voulez-vous supprimer cette selection ?',
+                    okText: 'Agree',
+                    cancelText: 'Disagree',
+                    callback: function (result) {
+                        if (result === true) {
+                            inst.removeEvent(event.event.id);
+                            envoyer_donnee(event, inst);
+                        }
+                    }
+                });
+            },
+
+            onEventUpdated: function (event, inst){
+                envoyer_donnee(event, inst);
+            },
+
+            onEventDelete: function (event, inst) {
+                envoyer_donnee(event, inst);
+            },
+
+            onEventCreated: function (event, inst){
+                envoyer_donnee(event, inst);
+            }
+        });
+
+        var jsonData = JSON.parse(document.getElementById("jsonData").textContent);
+
+        for (var key in jsonData){
+            console.log(jsonData[key]);
+            inst.addEvent(jsonData[key]);
+        }
+
+       ajout_bouton();
+
+        document.getElementById('boutonManuel').addEventListener('click', function() {
+            window.location.href = '/';
+        });
+
+    </script>
+
+
+</body>
+
+</html>

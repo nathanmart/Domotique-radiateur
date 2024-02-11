@@ -1,0 +1,6 @@
+/*Boutons choix de page*/
+.mbsc-button-group-justified button {
+    height: 4vh; /* 30% de la hauteur de la fenêtre de visualisation */
+    width: 8vw;
+    font-size: 15px;
+}
