@@ -23,7 +23,7 @@
 <!-- Buttons are streched to fill the full width of the container.-->
 <div class="mbsc-button-group-justified">
     <button id="boutonPlanning"  mbsc-button data-theme="ios" data-color="info" >Planning</button>
-    <button id="boutonOption"mbsc-button data-theme="ios" data-color="info"">Options</button>
+    <button id="boutonOption"mbsc-button data-theme="ios" data-color="info">Options</button>
 </div>
 
 <div mbsc-segmented-group>
@@ -90,8 +90,6 @@
     const reponseServeur = document.getElementById("reponseServeur");
 
     function demander_etat(){
-
-
         var xhr = new XMLHttpRequest();
 
         xhr.open('POST', '/retourner_etat/', true);
@@ -102,22 +100,18 @@
             if (xhr.status === 200) { // Vérifiez que la requête s'est bien déroulée (statut HTTP 200 OK)
                 var responseText = xhr.responseText; // Récupérez le texte de la réponse JSON
                 var jsonData = JSON.parse(responseText); // Parsez le texte JSON en objet JavaScript
+                console.log(jsonData);
 
-                // Pour affichage textuel, non utilisé
-                {#document.getElementById("chambreText").innerHTML = jsonData.Chambre;#}
-                {#document.getElementById("cuisineText").innerHTML = jsonData.Cuisine;#}
-                radiateur = ["Chambre", "Cuisine"];
+                {#radiateur = ["Chambre", "Cuisine"];#}
+                radiateur = ["Cuisine"];
+
                 for (let item of radiateur) {
+                    console.log(item);
                     etat = jsonData[item];
                     let emplacement = document.getElementById(item);
                     console.log('image_cache_' + etat)
                     var imageUrl = document.getElementById('image_cache_' + etat).getAttribute('data-image-url');
                     emplacement.src = imageUrl;
-                    if (etat == "ERREUR"){
-                        setTimeout(function() {
-                            demander_etat();
-                        }, 100);
-                    }
                 }
             }
         };
@@ -174,7 +168,9 @@
     });
 
     demander_etat();
+
     {#setInterval(demander_etat, 10000);#}
+
 
 </script>
 </body>

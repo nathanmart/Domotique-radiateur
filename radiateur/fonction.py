@@ -12,13 +12,13 @@ def set_liste_etat(liste):
 # Envoie aux radiateurs leur nouveau mode
 def envoyer_changement_etat_mqtt(mode, mqtt_client, liste_radiateur=LISTE_RADIATEUR, mqtt_topic=TOPIC_MQTT):
     for appareil in liste_radiateur:
-
         message = {
             "FROM": "Django",
             "TO": appareil,
             "COMMAND": mode,
         }
         mqtt_client.publish(str(message), mqtt_topic)
+        enregistrer_log(f"Modification état: {appareil} --> {mode}")
     return True
 
 # Met à jour le mode des radiateurs en fonction du planning
@@ -41,8 +41,10 @@ def maj_etat_selon_planning(mqtt_client):
                 heure_actuelle = datetime.now().replace(second=0, microsecond=0)
 
                 if end == heure_actuelle:
+                    enregistrer_log("Depuis planning --> ECO")
                     envoyer_changement_etat_mqtt("ECO", mqtt_client)
                 elif start == heure_actuelle:
+                    enregistrer_log("Depuis planning --> CONFORT")
                     envoyer_changement_etat_mqtt("COMFORT", mqtt_client)
 
             last_min = heure_actuelle
@@ -58,7 +60,7 @@ def boucle_demander_etat_appareil(mqtt_client, nb_try = 1, liste_radiateur=LISTE
 # Envoie des demandes aux radiateurs pour connaitre leur état
 def demander_etat_au_appareil(mqtt_client, nb_try = 1, liste_radiateur=LISTE_RADIATEUR):
     global liste_etat
-    print(nb_try)
+    enregistrer_log(f"Demande etat des appareils: {liste_radiateur} - Tentative : {nb_try}")
     # Lorsque la fonction est appele recursivement pour la 4eme (donc 3 try), on considère que le radiateur est
     # deconnecté
     if nb_try >= 4:
@@ -102,6 +104,7 @@ def demander_etat_au_appareil(mqtt_client, nb_try = 1, liste_radiateur=LISTE_RAD
                     # Dans ce cas on a une réponse valide
                     reponse_obtenu[expediteur] = True
                     liste_etat[expediteur] = message["COMMAND"]
+                    enregistrer_log(f"Reponse sur son état obtenu de {expediteur} : {message['COMMAND']}")
 
         # Dans le cas ou tout les appareils ont répondu, on casse la boucle
         if not False in reponse_obtenu.values():
@@ -123,3 +126,10 @@ def demander_etat_au_appareil(mqtt_client, nb_try = 1, liste_radiateur=LISTE_RAD
         time.sleep(0.01)
 
     return 0
+
+def enregistrer_log(message, fichier="log.txt"):
+    heure_actuelle = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    message_formate = f"[{heure_actuelle}] {message}\n"
+
+    with open(fichier, "a") as f:
+        f.write(message_formate)
