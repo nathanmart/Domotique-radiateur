@@ -3,6 +3,7 @@ from .parametres import *
 import json
 from datetime import datetime, timedelta
 
+
 # Reception de la lisste afin de la lier entre les différents programmes
 def set_liste_etat(liste):
     global liste_etat
@@ -24,11 +25,10 @@ def envoyer_changement_etat_mqtt(mode, mqtt_client, liste_radiateur=LISTE_RADIAT
 # Met à jour le mode des radiateurs en fonction du planning
 # Boucle infini bloquante, A EXECUTER DANS UN THREAD
 def maj_etat_selon_planning(mqtt_client):
-    last_min = datetime.now() - timedelta(minutes=1)
+    last_min = datetime.now(paris_tz) - timedelta(minutes=1)
     while True:
-        heure_actuelle = datetime.now()
+        heure_actuelle = datetime.now(paris_tz)
         if heure_actuelle.minute != last_min.minute:
-
             with open("radiateur/templates/data.json", "r") as file:
                 data = json.load(file)
 
@@ -36,10 +36,11 @@ def maj_etat_selon_planning(mqtt_client):
                 start = event["start"]
                 end = event["end"]
                 start = datetime.strptime(start, "%Y-%m-%dT%H:%M:%S").replace(second=0, microsecond=0)
+                start = paris_tz.localize(start)
                 end = datetime.strptime(end, "%Y-%m-%dT%H:%M:%S").replace(second=0, microsecond=0)
+                end = paris_tz.localize(end)
 
-                heure_actuelle = datetime.now().replace(second=0, microsecond=0)
-
+                heure_actuelle = datetime.now(paris_tz).replace(second=0, microsecond=0)
                 if end == heure_actuelle:
                     enregistrer_log("Depuis planning --> ECO")
                     envoyer_changement_etat_mqtt("ECO", mqtt_client)
@@ -128,7 +129,7 @@ def demander_etat_au_appareil(mqtt_client, nb_try = 1, liste_radiateur=LISTE_RAD
     return 0
 
 def enregistrer_log(message, fichier="log.txt"):
-    heure_actuelle = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    heure_actuelle = datetime.now(paris_tz).strftime("%Y-%m-%d %H:%M:%S")
     message_formate = f"[{heure_actuelle}] {message}\n"
 
     with open(fichier, "a") as f:
