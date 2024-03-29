@@ -19,6 +19,7 @@ from .parametres import IP_MQTT, TOPIC_MQTT, LISTE_RADIATEUR
 global mqtt_client, liste_etat
 
 
+
 # Affichage page de planning
 @csrf_exempt
 @never_cache
@@ -92,6 +93,17 @@ except Exception as e:
 
 # Thread pour mettre suivre les instructions du planning
 t = threading.Thread(target=maj_etat_selon_planning, args=(mqtt_client,)).start()
+
+# Temporaire
+# Enregistre l'heure chaque minutes avant de voir à quel moment le serveur s'arrête
+def TEMPORAIRE_log_heure():
+    while True:
+        heure_actuelle = datetime.now(paris_tz).strftime("%Y-%m-%d %H:%M:%S")
+        with open("TEMPORAIRE_log", "a") as f:
+            f.write(heure_actuelle + "\n")
+        time.sleep(60)
+
+t2 = threading.Thread(target=TEMPORAIRE_log_heure).start()
 
 # Thread pour mettre à jour les états
 # thread_etat = threading.Thread(target=boucle_demander_etat_appareil, args=(mqtt_client,)).start()

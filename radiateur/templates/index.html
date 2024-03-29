@@ -102,8 +102,8 @@
                 var jsonData = JSON.parse(responseText); // Parsez le texte JSON en objet JavaScript
                 console.log(jsonData);
 
-                {#radiateur = ["Chambre", "Cuisine"];#}
-                radiateur = ["Cuisine"];
+                radiateur = ["Chambre", "Cuisine"];
+                {#radiateur = ["Cuisine"];#}
 
                 for (let item of radiateur) {
                     console.log(item);
@@ -144,7 +144,7 @@
 
         setTimeout(function() {
             demander_etat();
-        }, 10);
+        }, 50);
     }
 
 

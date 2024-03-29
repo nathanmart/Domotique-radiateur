@@ -4,6 +4,7 @@ import time
 class MQTTClient:
 
     def __init__(self, broker_address, broker_port=1883):
+        # self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
         self.client = mqtt.Client()
         self.client.connect(broker_address, broker_port)
         self.message_recu = []
@@ -18,6 +19,9 @@ class MQTTClient:
 
     def on_message(self, client, userdata, message):
         self.message_recu.append((time.time(), message.payload.decode("utf-8")))
+        heure_actuelle = datetime.now(paris_tz).strftime("%Y-%m-%d %H:%M:%S")
+        with open("LOG_MQTT", "a") as f:
+            f.write(heure_actuelle + " : " + message.payload.decode("utf-8"))
 
     def unsubscribe(self):
         self.client.loop_stop()
