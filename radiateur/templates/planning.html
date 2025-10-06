@@ -14,12 +14,10 @@
             <div class="d-flex flex-column gap-3 gap-md-4 mb-4">
                 <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-md-between gap-3">
                     <div>
-                        <h1 class="h3 mb-1">Planning hebdomadaire</h1>
-                        <p class="text-muted mb-0">Glissez et étirez les blocs pour définir les périodes d'activation.</p>
+                        <h1 class="h3 mb-0">Planning hebdomadaire</h1>
                     </div>
                     <div class="d-flex flex-column flex-sm-row gap-2 w-100 w-md-auto">
                         <a class="btn btn-outline-secondary flex-fill" href="/">Retour au tableau de bord</a>
-                        <button class="btn btn-primary flex-fill" type="button" id="saveSchedule">Enregistrer le planning</button>
                     </div>
                 </div>
                 <div id="statusAlert" class="alert d-none" role="alert" aria-live="polite"></div>
@@ -32,7 +30,6 @@
                     </button>
                     <div class="day-switcher-label text-center">
                         <div class="fw-semibold" id="currentDayLabel">Lundi</div>
-                        <div class="text-muted small">Touchez un bloc pour le déplacer ou le redimensionner.</div>
                     </div>
                     <button class="btn btn-outline-secondary day-switcher-btn" type="button" id="nextDay" aria-label="Jour suivant">
                         <span aria-hidden="true">&rarr;</span>
@@ -44,13 +41,6 @@
                     <div class="timeline-track" id="dayTrack" data-day="monday"></div>
                 </div>
 
-                <div class="mt-3 d-flex gap-2">
-                    <button class="btn btn-outline-primary flex-fill" type="button" id="addSlotButton">Ajouter un créneau</button>
-                    <button class="btn btn-outline-danger flex-fill" type="button" id="clearDayButton">Vider le jour</button>
-                </div>
-                <p class="text-muted small mt-3 mb-0">
-                    Astuce&nbsp;: maintenez le doigt sur une zone vide pour dessiner un nouveau créneau.
-                </p>
             </div>
         </div>
 
@@ -68,7 +58,6 @@
 
             const MINUTES_IN_DAY = 24 * 60;
             const SLOT_MIN_DURATION = 15;
-            const DEFAULT_SLOT_DURATION = 60;
             const EDGE_RESIZE_GUTTER = 32;
             const TIMELINE_BOTTOM_MARGIN = 24;
             const MIN_TIMELINE_HEIGHT = 360;
@@ -76,9 +65,6 @@
             const scheduleBoard = document.getElementById('dayTrack');
             const timelineHours = document.getElementById('timelineHours');
             const statusAlert = document.getElementById('statusAlert');
-            const saveButton = document.getElementById('saveSchedule');
-            const addButton = document.getElementById('addSlotButton');
-            const clearButton = document.getElementById('clearDayButton');
             const prevButton = document.getElementById('prevDay');
             const nextButton = document.getElementById('nextDay');
             const currentDayLabel = document.getElementById('currentDayLabel');
@@ -92,6 +78,7 @@
             const CREATE_MOVE_THRESHOLD = 8;
             let pixelsPerMinute = 1;
             let pendingTimelineRefresh = false;
+            let autoSaveTimeout = null;
 
             function showStatus(message, type = 'info', autoHide = true) {
                 statusAlert.textContent = message;
@@ -283,8 +270,8 @@
                 });
             }
 
-            function persistSchedule(successMessage = 'Planning enregistré.') {
-                showStatus('Enregistrement en cours…', 'info', false);
+            function persistSchedule(successMessage = 'Planning enregistré.', pendingMessage = 'Enregistrement en cours…') {
+                showStatus(pendingMessage, 'info', false);
                 return fetch('/maj_json', {
                     method: 'POST',
                     headers: {
@@ -302,6 +289,16 @@
                     .catch(() => {
                         showStatus("Erreur lors de l'enregistrement du planning.", 'danger');
                     });
+            }
+
+            function scheduleAutoSave(successMessage = 'Planning enregistré automatiquement.') {
+                if (autoSaveTimeout) {
+                    clearTimeout(autoSaveTimeout);
+                }
+                autoSaveTimeout = window.setTimeout(() => {
+                    autoSaveTimeout = null;
+                    persistSchedule(successMessage, 'Enregistrement automatique en cours…');
+                }, 300);
             }
 
             function canPlaceSlot(dayKey, startMinutes, endMinutes, excludeIndex = null) {
@@ -323,22 +320,6 @@
                 return true;
             }
 
-            function findAvailableStart(dayKey, durationMinutes) {
-                const slots = sortSlots(currentSchedule[dayKey] || []);
-                let previousEnd = 0;
-                for (let i = 0; i < slots.length; i += 1) {
-                    const start = timeToMinutes(slots[i].start);
-                    if (start - previousEnd >= durationMinutes) {
-                        return previousEnd;
-                    }
-                    previousEnd = timeToMinutes(slots[i].end);
-                }
-                if (MINUTES_IN_DAY - previousEnd >= durationMinutes) {
-                    return previousEnd;
-                }
-                return null;
-            }
-
             function addSlot(dayKey, startMinutes, endMinutes) {
                 const slots = currentSchedule[dayKey] || [];
                 slots.push({ start: minutesToTime(startMinutes), end: minutesToTime(endMinutes) });
@@ -354,6 +335,7 @@
                 slots.splice(index, 1);
                 currentSchedule[dayKey] = slots;
                 renderCurrentDay();
+                scheduleAutoSave();
             }
 
             function beginMove(event, dayKey, index, block) {
@@ -514,6 +496,7 @@
                     end: minutesToTime(currentEnd),
                 };
                 renderCurrentDay();
+                scheduleAutoSave();
             }
 
             function commitResize() {
@@ -523,6 +506,7 @@
                     end: minutesToTime(currentEnd),
                 };
                 renderCurrentDay();
+                scheduleAutoSave();
             }
 
             function commitCreate() {
@@ -533,6 +517,7 @@
                     return;
                 }
                 addSlot(dayKey, currentStart, currentEnd);
+                scheduleAutoSave();
             }
 
             function cancelActiveInteraction() {
@@ -667,40 +652,6 @@
                     );
                 }
                 cancelActiveInteraction();
-            });
-
-            saveButton.addEventListener('click', () => {
-                persistSchedule();
-            });
-
-            addButton.addEventListener('click', () => {
-                const dayKey = DAYS[currentDayIndex].key;
-                const availableStart = findAvailableStart(dayKey, DEFAULT_SLOT_DURATION);
-                if (availableStart === null) {
-                    showStatus('Aucun créneau disponible. Supprimez ou réduisez un bloc existant.', 'warning');
-                    return;
-                }
-                const start = snapMinutes(availableStart);
-                let end = start + DEFAULT_SLOT_DURATION;
-                if (end > MINUTES_IN_DAY) {
-                    end = MINUTES_IN_DAY;
-                }
-                addSlot(dayKey, start, end);
-                showStatus('Nouveau créneau ajouté. Ajustez-le avec un glisser-déposer.', 'info');
-            });
-
-            clearButton.addEventListener('click', () => {
-                const dayKey = DAYS[currentDayIndex].key;
-                if (!currentSchedule[dayKey] || currentSchedule[dayKey].length === 0) {
-                    return;
-                }
-                const confirmation = window.confirm('Supprimer tous les créneaux de ce jour ?');
-                if (!confirmation) {
-                    return;
-                }
-                currentSchedule[dayKey] = [];
-                renderCurrentDay();
-                showStatus('Tous les créneaux ont été supprimés pour ce jour.', 'info');
             });
 
             prevButton.addEventListener('click', () => {
