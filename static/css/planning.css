@@ -1,6 +1,26 @@
-/*Boutons choix de page*/
-.mbsc-button-group-justified button {
-    height: 4vh; /* 30% de la hauteur de la fenêtre de visualisation */
-    width: 8vw;
-    font-size: 15px;
+body {
+    min-height: 100vh;
+}
+
+.schedule-card {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.schedule-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.12);
+}
+
+.slot-label {
+    font-weight: 600;
+}
+
+.slot-empty {
+    font-style: italic;
+}
+
+#statusAlert {
+    position: sticky;
+    top: 1rem;
+    z-index: 1030;
 }

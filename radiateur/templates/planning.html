@@ -1,217 +1,331 @@
 {% load static %}
 <!DOCTYPE html>
-<html>
-
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-
-    <title>
-        Controle radiateur - Planning
-    </title>
-
-    <!-- Mobiscroll JS and CSS Includes -->
-    <link rel="stylesheet" href="{% static "css/mobiscroll.javascript.min.css" %}">
-    <script src="{% static "js/mobiscroll.javascript.min.js" %}"></script>
-
-    <link rel="stylesheet" href="{% static "css/planning.css" %}">
-
-    <style>
-            body {
-        margin: 0;
-        padding: 0;
-    }
-
-    body,
-    html {
-        height: 100%;
-    }
-
-    </style>
-
-</head>
-
-<body>
-    <div id="jsonData" style="display: none;">
-        <!-- Affichage des données JSON -->
-        {{ data|safe }}
-    </div>
-    <div mbsc-page class="demo-responsive-day-week-schedule">
-        <div style="height:100%">
-                <div id="demo"></div>
+<html lang="fr">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Contrôle radiateur - Planning</title>
+        <link rel="stylesheet" href="{% static 'bootstrap-5.3.8-dist/css/bootstrap.min.css' %}">
+        <link rel="stylesheet" href="{% static 'css/planning.css' %}">
+    </head>
+    <body class="bg-light">
+        <script id="schedule-data" type="application/json">{{ data|safe }}</script>
+        <div class="container py-4">
+            <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3 mb-4">
+                <div>
+                    <h1 class="h3 mb-1">Planning hebdomadaire</h1>
+                    <p class="text-muted mb-0">Ajoutez des périodes d'activation pour chaque jour de la semaine.</p>
+                </div>
+                <div class="d-flex gap-2">
+                    <a class="btn btn-outline-secondary" href="/">Retour au tableau de bord</a>
+                    <button class="btn btn-primary" type="button" id="saveSchedule">Enregistrer le planning</button>
+                </div>
+            </div>
+            <div id="statusAlert" class="alert d-none" role="alert"></div>
+            <div id="scheduleGrid" class="row g-3"></div>
         </div>
-    </div>
 
-    <script>
-        function getCookie(name) {
-            let cookieValue = null;
-            if (document.cookie && document.cookie !== '') {
-                const cookies = document.cookie.split(';');
-                for (let i = 0; i < cookies.length; i++) {
-                    const cookie = cookies[i].trim();
-                    if (cookie.startsWith(name + '=')) {
-                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-                        break;
+        <div class="modal fade" id="slotModal" tabindex="-1" aria-labelledby="slotModalLabel" aria-hidden="true">
+            <div class="modal-dialog">
+                <form class="modal-content" id="slotForm">
+                    <div class="modal-header">
+                        <h2 class="modal-title fs-5" id="slotModalLabel">Ajouter un créneau</h2>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label" for="startTime">Heure de début</label>
+                            <input class="form-control" type="time" id="startTime" name="start" step="300" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label" for="endTime">Heure de fin</label>
+                            <input class="form-control" type="time" id="endTime" name="end" step="300" required>
+                        </div>
+                        <div id="slotError" class="text-danger small"></div>
+                        <input type="hidden" id="modalDay" name="day">
+                        <input type="hidden" id="slotIndex" name="index">
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Annuler</button>
+                        <button type="submit" class="btn btn-primary">Enregistrer</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <script src="{% static 'bootstrap-5.3.8-dist/js/bootstrap.bundle.min.js' %}"></script>
+        <script>
+            const DAYS = [
+                { key: 'monday', label: 'Lundi' },
+                { key: 'tuesday', label: 'Mardi' },
+                { key: 'wednesday', label: 'Mercredi' },
+                { key: 'thursday', label: 'Jeudi' },
+                { key: 'friday', label: 'Vendredi' },
+                { key: 'saturday', label: 'Samedi' },
+                { key: 'sunday', label: 'Dimanche' },
+            ];
+
+            const scheduleGrid = document.getElementById('scheduleGrid');
+            const statusAlert = document.getElementById('statusAlert');
+            const modalElement = document.getElementById('slotModal');
+            const slotModal = new bootstrap.Modal(modalElement);
+            const slotForm = document.getElementById('slotForm');
+            const startInput = document.getElementById('startTime');
+            const endInput = document.getElementById('endTime');
+            const dayInput = document.getElementById('modalDay');
+            const indexInput = document.getElementById('slotIndex');
+            const slotError = document.getElementById('slotError');
+            const saveButton = document.getElementById('saveSchedule');
+
+            let statusTimeout = null;
+
+            function showStatus(message, type = 'info', autoHide = true) {
+                statusAlert.textContent = message;
+                statusAlert.className = `alert alert-${type}`;
+                if (autoHide) {
+                    if (statusTimeout) {
+                        clearTimeout(statusTimeout);
+                    }
+                    statusTimeout = setTimeout(() => {
+                        statusAlert.classList.add('d-none');
+                    }, 3500);
+                } else {
+                    if (statusTimeout) {
+                        clearTimeout(statusTimeout);
+                        statusTimeout = null;
                     }
                 }
-            }
-            return cookieValue;
-        }
-
-        // Ajout des boutons en haut
-        function ajout_bouton() {
-            var emplacements = document.getElementsByClassName("mbsc-flex mbsc-flex-1-1 mbsc-calendar-title-wrapper mbsc-ios");
-
-            // Créer le div conteneur
-            var div = document.createElement('div');
-            div.className = 'mbsc-button-group-justified';
-
-            // Créer le premier bouton
-            var boutonPlanning = document.createElement('button');
-            boutonPlanning.id = 'boutonManuel';
-            boutonPlanning.setAttribute('mbsc-button', '');
-            boutonPlanning.setAttribute('data-theme', 'ios');
-            boutonPlanning.setAttribute('data-color', 'info');
-            boutonPlanning.setAttribute('data-icon', 'home');
-
-            // Créer le deuxième bouton
-            var boutonOptions = document.createElement('button');
-            boutonOptions.id = "boutonOption"
-            boutonOptions.setAttribute('mbsc-button', '');
-            boutonOptions.setAttribute('data-theme', 'ios');
-            boutonOptions.setAttribute('data-color', 'info');
-            boutonOptions.setAttribute('data-icon', 'cogs');
-
-            // Ajouter les boutons au div
-            div.appendChild(boutonPlanning);
-            div.appendChild(boutonOptions);
-
-            for(var i = 0; i < emplacements.length; i++) {
-                emplacements[i].appendChild(div.cloneNode(true));
+                statusAlert.classList.remove('d-none');
             }
 
-        }
-
-
-        // Envoie au serveur des données mise à jour
-        function envoyer_donnee(event, inst){
-            var donnee = inst.getEvents();
-
-            // Formatage des heures pour éviter les problèmes de décalage horaire
-            donnee = JSON.stringify(donnee, function(key, value) {
-                if (key === 'start' || key === 'end') {
-                    // Convertir la chaîne de date ISO 8601 en objet Date
-                    var date = new Date(value);
-                    // Récupérer les composantes de la date (année, mois, jour, heure, minute, seconde)
-                    var year = date.getFullYear();
-                    var month = ('0' + (date.getMonth() + 1)).slice(-2); // Les mois sont indexés à partir de 0
-                    var day = ('0' + date.getDate()).slice(-2);
-                    var hours = ('0' + date.getHours()).slice(-2);
-                    var minutes = ('0' + date.getMinutes()).slice(-2);
-                    var seconds = ('0' + date.getSeconds()).slice(-2);
-                    // Construire la chaîne de date au format "YYYY-MM-DDTHH:MM:SS"
-                    return year + '-' + month + '-' + day + 'T' + hours + ':' + minutes + ':' + seconds;
+            function hideStatus() {
+                statusAlert.classList.add('d-none');
+                if (statusTimeout) {
+                    clearTimeout(statusTimeout);
+                    statusTimeout = null;
                 }
-                return value;
-            });
-            console.log("LES DONNEES MODIFIE SONT");
-            console.log(donnee);
-            var xhr = new XMLHttpRequest();
-            xhr.open('POST', '/maj_json', true);
-            xhr.setRequestHeader('X-CSRFToken', getCookie('csrftoken'));
-            xhr.responseType = "blob";
-            xhr.onload = function(){
-                if (this.status === 200){
-                    console.log("Bien envoyé");
-                    mobiscroll.toast({
-                        message: 'Mise à jour bien envoyée au serveur'
-                    });
-                } else{
-                    console.log("Erreur d'envoie: " + str(this.status));
-                    mobiscroll.toast({
-                        message: 'Echecs de l\'envoie de la mise à jour au serveur'
-                    });
+            }
+
+            function getCookie(name) {
+                let cookieValue = null;
+                if (document.cookie && document.cookie !== '') {
+                    const cookies = document.cookie.split(';');
+                    for (let i = 0; i < cookies.length; i++) {
+                        const cookie = cookies[i].trim();
+                        if (cookie.startsWith(name + '=')) {
+                            cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                            break;
+                        }
+                    }
                 }
-            };
-            xhr.send(donnee);
-        }
+                return cookieValue;
+            }
 
-
-        mobiscroll.setOptions({
-            theme: 'ios',
-            locale: mobiscroll.localeFr
-        });
-
-        var inst = mobiscroll.eventcalendar('#demo', {
-            locale: mobiscroll.localeFr,  // Specify language like: locale: mobiscroll.localePl or omit setting to use default
-            theme: 'ios',                 // Specify theme like: theme: 'ios' or omit setting to use default
-            themeVariant: 'light',        // More info about themeVariant: https://docs.mobiscroll.com/5-28-3/javascript/eventcalendar#opt-themeVariant
-            responsive: {                 // More info about responsive: https://docs.mobiscroll.com/5-28-3/javascript/eventcalendar#opt-responsive
-                xsmall: {
-                    view: {               // More info about view: https://docs.mobiscroll.com/5-28-3/javascript/eventcalendar#opt-view
-                        schedule: {
-                            type: 'week',
-                            allDay: false
-                        }
-                    },
-
-                },
-
-            },
-            clickToCreate: true,
-            dragToCreate: true,
-            dragToMove: true,
-            dragToResize: true,
-            dragTimeStep: 30,
-            eventDelete: true,
-            eventOverlap: false,
-            actionableEvents: true,
-            showEventTooltip: true,
-
-            onEventClick: function (event, inst){
-                mobiscroll.confirm({
-                    title: 'Supprimer ?',
-                    message: 'Voulez-vous supprimer cette selection ?',
-                    okText: 'Agree',
-                    cancelText: 'Disagree',
-                    callback: function (result) {
-                        if (result === true) {
-                            inst.removeEvent(event.event.id);
-                            envoyer_donnee(event, inst);
-                        }
+            function ensureScheduleStructure(rawData) {
+                const schedule = {};
+                DAYS.forEach(({ key }) => {
+                    if (!rawData || !Array.isArray(rawData[key])) {
+                        schedule[key] = [];
+                    } else {
+                        schedule[key] = rawData[key]
+                            .filter((entry) => entry && typeof entry.start === 'string' && typeof entry.end === 'string')
+                            .map((entry) => ({ start: entry.start, end: entry.end }));
                     }
                 });
-            },
-
-            onEventUpdated: function (event, inst){
-                envoyer_donnee(event, inst);
-            },
-
-            onEventDelete: function (event, inst) {
-                envoyer_donnee(event, inst);
-            },
-
-            onEventCreated: function (event, inst){
-                envoyer_donnee(event, inst);
+                return schedule;
             }
-        });
 
-        var jsonData = JSON.parse(document.getElementById("jsonData").textContent);
+            function buildLayout() {
+                DAYS.forEach(({ key, label }) => {
+                    const column = document.createElement('div');
+                    column.className = 'col-12 col-md-6 col-lg-4';
+                    column.innerHTML = `
+                        <div class="card shadow-sm h-100 schedule-card" data-day="${key}">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <span class="fw-semibold">${label}</span>
+                                <button type="button" class="btn btn-sm btn-outline-primary" data-action="add-slot" data-day="${key}">
+                                    Ajouter
+                                </button>
+                            </div>
+                            <ul class="list-group list-group-flush" data-role="slot-list"></ul>
+                        </div>
+                    `;
+                    scheduleGrid.appendChild(column);
+                });
+            }
 
-        for (var key in jsonData){
-            console.log(jsonData[key]);
-            inst.addEvent(jsonData[key]);
-        }
+            function renderDay(dayKey) {
+                const dayCard = scheduleGrid.querySelector(`[data-day="${dayKey}"]`);
+                if (!dayCard) {
+                    return;
+                }
+                const list = dayCard.querySelector('[data-role="slot-list"]');
+                list.innerHTML = '';
+                const slots = currentSchedule[dayKey] || [];
+                if (!slots.length) {
+                    const emptyItem = document.createElement('li');
+                    emptyItem.className = 'list-group-item text-muted slot-empty';
+                    emptyItem.textContent = 'Aucun créneau défini';
+                    list.appendChild(emptyItem);
+                    return;
+                }
 
-       ajout_bouton();
+                slots.forEach((slot, index) => {
+                    const item = document.createElement('li');
+                    item.className = 'list-group-item d-flex justify-content-between align-items-center gap-2';
+                    item.innerHTML = `
+                        <span class="slot-label">${slot.start} – ${slot.end}</span>
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button type="button" class="btn btn-outline-secondary" data-action="edit-slot" data-day="${dayKey}" data-index="${index}">Modifier</button>
+                            <button type="button" class="btn btn-outline-danger" data-action="delete-slot" data-day="${dayKey}" data-index="${index}">Supprimer</button>
+                        </div>
+                    `;
+                    list.appendChild(item);
+                });
+            }
 
-        document.getElementById('boutonManuel').addEventListener('click', function() {
-            window.location.href = '/';
-        });
+            function renderSchedule() {
+                DAYS.forEach(({ key }) => renderDay(key));
+            }
 
-    </script>
+            function sortAndValidate(slots) {
+                const sorted = [...slots].sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
+                for (let i = 0; i < sorted.length; i += 1) {
+                    const start = sorted[i].start;
+                    const end = sorted[i].end;
+                    if (start >= end) {
+                        return null;
+                    }
+                    if (i > 0 && start < sorted[i - 1].end) {
+                        return null;
+                    }
+                }
+                return sorted;
+            }
 
+            function persistSchedule(successMessage = 'Planning enregistré.') {
+                showStatus('Enregistrement en cours…', 'info', false);
+                return fetch('/maj_json', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCookie('csrftoken'),
+                    },
+                    body: JSON.stringify(currentSchedule),
+                })
+                    .then((response) => {
+                        if (!response.ok) {
+                            throw new Error('Réponse invalide');
+                        }
+                        showStatus(successMessage, 'success');
+                    })
+                    .catch(() => {
+                        showStatus("Erreur lors de l'enregistrement du planning.", 'danger');
+                    });
+            }
 
-</body>
+            function handleAddOrEdit(dayKey, index = null) {
+                slotError.textContent = '';
+                dayInput.value = dayKey;
+                indexInput.value = index !== null ? String(index) : '';
+                const titleElement = modalElement.querySelector('.modal-title');
+                if (index !== null) {
+                    const slot = currentSchedule[dayKey][index];
+                    startInput.value = slot.start;
+                    endInput.value = slot.end;
+                    if (titleElement) {
+                        titleElement.textContent = 'Modifier le créneau';
+                    }
+                } else {
+                    startInput.value = '';
+                    endInput.value = '';
+                    if (titleElement) {
+                        titleElement.textContent = 'Ajouter un créneau';
+                    }
+                }
+                slotModal.show();
+            }
 
+            function removeSlot(dayKey, index) {
+                const slots = currentSchedule[dayKey] || [];
+                if (index < 0 || index >= slots.length) {
+                    return;
+                }
+                const confirmation = window.confirm('Supprimer ce créneau ?');
+                if (!confirmation) {
+                    return;
+                }
+                slots.splice(index, 1);
+                currentSchedule[dayKey] = sortAndValidate(slots) || [];
+                renderDay(dayKey);
+                persistSchedule('Créneau supprimé.');
+            }
+
+            slotForm.addEventListener('submit', (event) => {
+                event.preventDefault();
+                const dayKey = dayInput.value;
+                const start = startInput.value;
+                const end = endInput.value;
+                const index = indexInput.value !== '' ? Number.parseInt(indexInput.value, 10) : null;
+
+                if (!dayKey || !start || !end) {
+                    slotError.textContent = 'Veuillez renseigner toutes les informations.';
+                    return;
+                }
+
+                const slots = [...(currentSchedule[dayKey] || [])];
+
+                if (index !== null) {
+                    slots[index] = { start, end };
+                } else {
+                    slots.push({ start, end });
+                }
+
+                const normalized = sortAndValidate(slots);
+                if (!normalized) {
+                    slotError.textContent = 'Les créneaux ne doivent pas se chevaucher et la fin doit être postérieure au début.';
+                    return;
+                }
+
+                currentSchedule[dayKey] = normalized;
+                slotModal.hide();
+                renderDay(dayKey);
+                persistSchedule(index !== null ? 'Créneau modifié.' : 'Créneau ajouté.');
+            });
+
+            scheduleGrid.addEventListener('click', (event) => {
+                const actionButton = event.target.closest('button[data-action]');
+                if (!actionButton) {
+                    return;
+                }
+                const { action, day, index } = actionButton.dataset;
+                if (!day) {
+                    return;
+                }
+                if (action === 'add-slot') {
+                    handleAddOrEdit(day);
+                } else if (action === 'edit-slot') {
+                    handleAddOrEdit(day, Number.parseInt(index, 10));
+                } else if (action === 'delete-slot') {
+                    removeSlot(day, Number.parseInt(index, 10));
+                }
+            });
+
+            saveButton.addEventListener('click', () => {
+                persistSchedule();
+            });
+
+            modalElement.addEventListener('hidden.bs.modal', () => {
+                slotForm.reset();
+                slotError.textContent = '';
+            });
+
+            const rawSchedule = JSON.parse(document.getElementById('schedule-data').textContent || '{}');
+            let currentSchedule = ensureScheduleStructure(rawSchedule);
+
+            buildLayout();
+            renderSchedule();
+            hideStatus();
+        </script>
+    </body>
 </html>
