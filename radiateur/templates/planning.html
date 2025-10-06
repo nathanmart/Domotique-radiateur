@@ -69,8 +69,9 @@
             const MINUTES_IN_DAY = 24 * 60;
             const SLOT_MIN_DURATION = 15;
             const DEFAULT_SLOT_DURATION = 60;
-            const HOUR_HEIGHT = 64;
-            const MINUTE_HEIGHT = HOUR_HEIGHT / 60;
+            const EDGE_RESIZE_GUTTER = 32;
+            const TIMELINE_BOTTOM_MARGIN = 24;
+            const MIN_TIMELINE_HEIGHT = 360;
 
             const scheduleBoard = document.getElementById('dayTrack');
             const timelineHours = document.getElementById('timelineHours');
@@ -81,12 +82,16 @@
             const prevButton = document.getElementById('prevDay');
             const nextButton = document.getElementById('nextDay');
             const currentDayLabel = document.getElementById('currentDayLabel');
+            const timelineWrapper = document.querySelector('.timeline-wrapper');
+            const planningPanel = document.querySelector('.planning-panel');
 
             let statusTimeout = null;
             let currentDayIndex = 0;
             let activeInteraction = null;
             const CREATE_HOLD_DELAY = 200;
             const CREATE_MOVE_THRESHOLD = 8;
+            let pixelsPerMinute = 1;
+            let pendingTimelineRefresh = false;
 
             function showStatus(message, type = 'info', autoHide = true) {
                 statusAlert.textContent = message;
@@ -105,6 +110,7 @@
                     }
                 }
                 statusAlert.classList.remove('d-none');
+                scheduleTimelineRefresh();
             }
 
             function hideStatus() {
@@ -113,6 +119,7 @@
                     clearTimeout(statusTimeout);
                     statusTimeout = null;
                 }
+                scheduleTimelineRefresh();
             }
 
             function getCookie(name) {
@@ -145,7 +152,7 @@
             }
 
             function minutesToPixels(totalMinutes) {
-                return totalMinutes * MINUTE_HEIGHT;
+                return totalMinutes * pixelsPerMinute;
             }
 
             function clampMinutes(minutes) {
@@ -170,7 +177,7 @@
             function pointerMinutes(event) {
                 const rect = scheduleBoard.getBoundingClientRect();
                 const offsetY = event.clientY - rect.top;
-                return clampMinutes(offsetY / MINUTE_HEIGHT);
+                return clampMinutes(offsetY / Math.max(pixelsPerMinute, 0.0001));
             }
 
             function sortSlots(slots) {
@@ -179,16 +186,53 @@
 
             function renderHours() {
                 timelineHours.innerHTML = '';
+                const hourHeight = minutesToPixels(60);
                 for (let hour = 0; hour < 24; hour += 1) {
                     const hourRow = document.createElement('div');
                     hourRow.className = 'timeline-hour';
                     hourRow.textContent = `${hour.toString().padStart(2, '0')}:00`;
+                    hourRow.style.height = `${hourHeight}px`;
                     timelineHours.appendChild(hourRow);
                 }
                 const endMarker = document.createElement('div');
                 endMarker.className = 'timeline-hour timeline-hour-end';
                 endMarker.textContent = '24:00';
                 timelineHours.appendChild(endMarker);
+            }
+
+            function updateTimelineMetrics() {
+                if (!timelineWrapper || !planningPanel) {
+                    return;
+                }
+                const viewportHeight = window.innerHeight;
+                const wrapperRect = timelineWrapper.getBoundingClientRect();
+                const panelRect = planningPanel.getBoundingClientRect();
+                const spaceBelow = panelRect.bottom - wrapperRect.bottom;
+                let available = viewportHeight - wrapperRect.top - spaceBelow - TIMELINE_BOTTOM_MARGIN;
+                if (!Number.isFinite(available)) {
+                    available = MIN_TIMELINE_HEIGHT;
+                }
+                if (available < MIN_TIMELINE_HEIGHT) {
+                    available = MIN_TIMELINE_HEIGHT;
+                }
+                timelineWrapper.style.height = `${available}px`;
+                scheduleBoard.style.height = `${available}px`;
+                timelineHours.style.height = `${available}px`;
+                pixelsPerMinute = available / MINUTES_IN_DAY;
+                scheduleBoard.style.setProperty('--timeline-hour-height', `${available / 24}px`);
+                renderHours();
+                renderCurrentDay();
+            }
+
+            function scheduleTimelineRefresh() {
+                if (pendingTimelineRefresh) {
+                    return;
+                }
+                pendingTimelineRefresh = true;
+                window.requestAnimationFrame(() => {
+                    pendingTimelineRefresh = false;
+                    updateTimelineMetrics();
+                });
             }
 
             function updateDayNavigation() {
@@ -536,6 +580,19 @@
 
                 if (block && !block.classList.contains('slot-temporary')) {
                     const index = Number.parseInt(block.dataset.index, 10);
+                    const rect = block.getBoundingClientRect();
+                    const offsetY = event.clientY - rect.top;
+                    const safeGutter = Math.min(EDGE_RESIZE_GUTTER, rect.height / 2);
+                    const nearTop = offsetY <= safeGutter;
+                    const nearBottom = rect.bottom - event.clientY <= safeGutter;
+                    if (nearTop && !nearBottom) {
+                        beginResize(event, dayKey, index, block, 'start');
+                        return;
+                    }
+                    if (nearBottom && !nearTop) {
+                        beginResize(event, dayKey, index, block, 'end');
+                        return;
+                    }
                     beginMove(event, dayKey, index, block);
                     return;
                 }
@@ -665,10 +722,22 @@
             const rawSchedule = JSON.parse(document.getElementById('schedule-data').textContent || '{}');
             let currentSchedule = ensureScheduleStructure(rawSchedule);
 
-            renderHours();
             updateDayNavigation();
-            renderCurrentDay();
+            updateTimelineMetrics();
+            scheduleTimelineRefresh();
             hideStatus();
+
+            window.addEventListener('resize', scheduleTimelineRefresh);
+            window.addEventListener('orientationchange', scheduleTimelineRefresh);
+            if (window.ResizeObserver) {
+                const panelObserver = new ResizeObserver(() => {
+                    scheduleTimelineRefresh();
+                });
+                panelObserver.observe(planningPanel);
+                if (statusAlert) {
+                    panelObserver.observe(statusAlert);
+                }
+            }
         </script>
     </body>
 </html>

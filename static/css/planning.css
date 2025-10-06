@@ -1,9 +1,9 @@
 :root {
-    --timeline-hour-height: 64px;
+    --timeline-hour-height: 48px;
     --slot-radius: 16px;
     --slot-shadow: 0 18px 36px rgba(13, 110, 253, 0.18);
     --slot-shadow-active: 0 20px 42px rgba(13, 110, 253, 0.28);
-    --handle-size: 18px;
+    --handle-size: 28px;
 }
 
 body {
@@ -52,36 +52,41 @@ body {
 
 .timeline-wrapper {
     display: grid;
-    grid-template-columns: auto 1fr;
+    grid-template-columns: 72px 1fr;
+    align-items: stretch;
     gap: 1rem;
     margin-top: 1.5rem;
+    min-height: 420px;
 }
 
 .timeline-hours {
     display: flex;
     flex-direction: column;
-    gap: 0;
+    justify-content: flex-start;
+    height: 100%;
     font-size: 0.85rem;
     color: #6c757d;
     position: relative;
+    padding: 0.25rem 0;
+    pointer-events: none;
 }
 
 .timeline-hour {
-    height: var(--timeline-hour-height);
     display: flex;
     align-items: flex-start;
     justify-content: flex-end;
     padding-right: 0.5rem;
+    flex: 0 0 auto;
 }
 
 .timeline-hour-end {
-    height: auto;
-    margin-top: 0.25rem;
+    flex: 0 0 auto;
+    margin-top: auto;
+    padding-top: 0.25rem;
 }
 
 .timeline-track {
     position: relative;
-    height: calc(var(--timeline-hour-height) * 24);
     border-radius: 1.5rem;
     border: 1px solid rgba(15, 23, 42, 0.08);
     background-image: repeating-linear-gradient(
@@ -91,8 +96,9 @@ body {
         rgba(15, 23, 42, 0.06) calc(var(--timeline-hour-height) - 1px),
         rgba(15, 23, 42, 0.06) var(--timeline-hour-height)
     );
+    height: 100%;
     overflow: hidden;
-    touch-action: pan-y;
+    touch-action: none;
 }
 
 .slot {
@@ -146,13 +152,14 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
+    touch-action: none;
 }
 
 .slot-handle::before {
     content: '';
     width: 100%;
-    max-width: 80px;
-    height: 4px;
+    max-width: 96px;
+    height: 6px;
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.75);
 }
@@ -177,28 +184,12 @@ body {
     }
 
     .timeline-wrapper {
-        grid-template-columns: 1fr;
+        grid-template-columns: 56px 1fr;
+        min-height: 360px;
     }
 
-    .timeline-hours {
-        flex-direction: row;
-        overflow-x: auto;
-        position: sticky;
-        top: 0;
-        background: #fff;
-        padding-bottom: 0.5rem;
-        margin-bottom: 0.5rem;
-    }
-
-    .timeline-hour,
-    .timeline-hour-end {
-        height: auto;
-        min-width: 64px;
-        justify-content: center;
-        padding-right: 0;
-    }
-
-    .timeline-track {
-        height: calc(var(--timeline-hour-height) * 24);
+    .slot {
+        left: 1rem;
+        right: 1rem;
     }
 }
