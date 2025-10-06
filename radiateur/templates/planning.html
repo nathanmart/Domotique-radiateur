@@ -22,7 +22,10 @@
                 </div>
             </div>
             <div id="statusAlert" class="alert d-none" role="alert"></div>
-            <div id="scheduleGrid" class="row g-3"></div>
+            <div id="scheduleBoard" class="schedule-board"></div>
+            <p class="text-muted small mt-3 mb-0">
+                Double-cliquez sur une journée pour créer rapidement un créneau à l'endroit désiré.
+            </p>
         </div>
 
         <div class="modal fade" id="slotModal" tabindex="-1" aria-labelledby="slotModalLabel" aria-hidden="true">
@@ -65,7 +68,7 @@
                 { key: 'sunday', label: 'Dimanche' },
             ];
 
-            const scheduleGrid = document.getElementById('scheduleGrid');
+            const scheduleBoard = document.getElementById('scheduleBoard');
             const statusAlert = document.getElementById('statusAlert');
             const modalElement = document.getElementById('slotModal');
             const slotModal = new bootstrap.Modal(modalElement);
@@ -77,6 +80,8 @@
             const slotError = document.getElementById('slotError');
             const saveButton = document.getElementById('saveSchedule');
 
+            const HOUR_HEIGHT = 48;
+            const MINUTE_HEIGHT = HOUR_HEIGHT / 60;
             let statusTimeout = null;
 
             function showStatus(message, type = 'info', autoHide = true) {
@@ -135,52 +140,94 @@
                 return schedule;
             }
 
+            function minutesToPixels(totalMinutes) {
+                return totalMinutes * MINUTE_HEIGHT;
+            }
+
+            function clampMinutes(minutes) {
+                return Math.max(0, Math.min(24 * 60, minutes));
+            }
+
+            function snapMinutes(minutes, step = 15) {
+                return Math.round(minutes / step) * step;
+            }
+
+            function minutesToTime(minutes) {
+                const hours = Math.floor(minutes / 60)
+                    .toString()
+                    .padStart(2, '0');
+                const mins = Math.floor(minutes % 60)
+                    .toString()
+                    .padStart(2, '0');
+                return `${hours}:${mins}`;
+            }
+
+            function timeToMinutes(timeString) {
+                const [hours, minutes] = timeString.split(':');
+                return Number.parseInt(hours, 10) * 60 + Number.parseInt(minutes, 10);
+            }
+
             function buildLayout() {
+                scheduleBoard.innerHTML = '';
+                const hoursColumn = document.createElement('div');
+                hoursColumn.className = 'schedule-hours';
+                for (let hour = 0; hour < 24; hour += 1) {
+                    const hourRow = document.createElement('div');
+                    hourRow.className = 'schedule-hour';
+                    hourRow.textContent = `${hour.toString().padStart(2, '0')}:00`;
+                    hoursColumn.appendChild(hourRow);
+                }
+
+                const daysWrapper = document.createElement('div');
+                daysWrapper.className = 'schedule-days';
+
                 DAYS.forEach(({ key, label }) => {
                     const column = document.createElement('div');
-                    column.className = 'col-12 col-md-6 col-lg-4';
+                    column.className = 'schedule-day';
                     column.innerHTML = `
-                        <div class="card shadow-sm h-100 schedule-card" data-day="${key}">
-                            <div class="card-header d-flex justify-content-between align-items-center">
-                                <span class="fw-semibold">${label}</span>
-                                <button type="button" class="btn btn-sm btn-outline-primary" data-action="add-slot" data-day="${key}">
-                                    Ajouter
-                                </button>
-                            </div>
-                            <ul class="list-group list-group-flush" data-role="slot-list"></ul>
+                        <div class="schedule-day-header">
+                            <span class="fw-semibold">${label}</span>
+                            <button type="button" class="btn btn-sm btn-outline-primary" data-action="add-slot" data-day="${key}">
+                                Ajouter
+                            </button>
                         </div>
+                        <div class="schedule-day-body" data-day="${key}" data-role="slot-track"></div>
                     `;
-                    scheduleGrid.appendChild(column);
+                    daysWrapper.appendChild(column);
                 });
+
+                scheduleBoard.appendChild(hoursColumn);
+                scheduleBoard.appendChild(daysWrapper);
             }
 
             function renderDay(dayKey) {
-                const dayCard = scheduleGrid.querySelector(`[data-day="${dayKey}"]`);
-                if (!dayCard) {
+                const dayTrack = scheduleBoard.querySelector(`.schedule-day-body[data-day="${dayKey}"]`);
+                if (!dayTrack) {
                     return;
                 }
-                const list = dayCard.querySelector('[data-role="slot-list"]');
-                list.innerHTML = '';
                 const slots = currentSchedule[dayKey] || [];
-                if (!slots.length) {
-                    const emptyItem = document.createElement('li');
-                    emptyItem.className = 'list-group-item text-muted slot-empty';
-                    emptyItem.textContent = 'Aucun créneau défini';
-                    list.appendChild(emptyItem);
-                    return;
-                }
+                dayTrack.innerHTML = '';
 
                 slots.forEach((slot, index) => {
-                    const item = document.createElement('li');
-                    item.className = 'list-group-item d-flex justify-content-between align-items-center gap-2';
-                    item.innerHTML = `
-                        <span class="slot-label">${slot.start} – ${slot.end}</span>
-                        <div class="btn-group btn-group-sm" role="group">
-                            <button type="button" class="btn btn-outline-secondary" data-action="edit-slot" data-day="${dayKey}" data-index="${index}">Modifier</button>
-                            <button type="button" class="btn btn-outline-danger" data-action="delete-slot" data-day="${dayKey}" data-index="${index}">Supprimer</button>
+                    const block = document.createElement('div');
+                    block.className = 'schedule-slot';
+                    block.dataset.day = dayKey;
+                    block.dataset.index = index;
+
+                    const startMinutes = timeToMinutes(slot.start);
+                    const endMinutes = timeToMinutes(slot.end);
+                    block.style.top = `${minutesToPixels(startMinutes)}px`;
+                    block.style.height = `${minutesToPixels(endMinutes - startMinutes)}px`;
+
+                    block.innerHTML = `
+                        <div class="schedule-slot-time">${slot.start} – ${slot.end}</div>
+                        <div class="schedule-slot-actions">
+                            <button type="button" class="btn btn-sm btn-light" data-action="edit-slot" data-day="${dayKey}" data-index="${index}">Modifier</button>
+                            <button type="button" class="btn btn-sm btn-danger" data-action="delete-slot" data-day="${dayKey}" data-index="${index}">Supprimer</button>
                         </div>
                     `;
-                    list.appendChild(item);
+
+                    dayTrack.appendChild(block);
                 });
             }
 
@@ -224,7 +271,7 @@
                     });
             }
 
-            function handleAddOrEdit(dayKey, index = null) {
+            function handleAddOrEdit(dayKey, index = null, defaultStart = '', defaultEnd = '') {
                 slotError.textContent = '';
                 dayInput.value = dayKey;
                 indexInput.value = index !== null ? String(index) : '';
@@ -237,8 +284,8 @@
                         titleElement.textContent = 'Modifier le créneau';
                     }
                 } else {
-                    startInput.value = '';
-                    endInput.value = '';
+                    startInput.value = defaultStart;
+                    endInput.value = defaultEnd;
                     if (titleElement) {
                         titleElement.textContent = 'Ajouter un créneau';
                     }
@@ -293,7 +340,7 @@
                 persistSchedule(index !== null ? 'Créneau modifié.' : 'Créneau ajouté.');
             });
 
-            scheduleGrid.addEventListener('click', (event) => {
+            scheduleBoard.addEventListener('click', (event) => {
                 const actionButton = event.target.closest('button[data-action]');
                 if (!actionButton) {
                     return;
@@ -313,6 +360,23 @@
 
             saveButton.addEventListener('click', () => {
                 persistSchedule();
+            });
+
+            scheduleBoard.addEventListener('dblclick', (event) => {
+                const track = event.target.closest('[data-role="slot-track"]');
+                if (!track) {
+                    return;
+                }
+                const { day } = track.dataset;
+                const rect = track.getBoundingClientRect();
+                const offsetMinutes = clampMinutes((event.clientY - rect.top) / MINUTE_HEIGHT);
+                const baseStart = clampMinutes(snapMinutes(offsetMinutes));
+                const startMinutes = Math.min(baseStart, 24 * 60 - 15);
+                let endMinutes = clampMinutes(startMinutes + 60);
+                if (endMinutes <= startMinutes) {
+                    endMinutes = clampMinutes(startMinutes + 15);
+                }
+                handleAddOrEdit(day, null, minutesToTime(startMinutes), minutesToTime(endMinutes));
             });
 
             modalElement.addEventListener('hidden.bs.modal', () => {
