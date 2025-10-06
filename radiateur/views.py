@@ -1,109 +1,97 @@
-import ast
-import sys
-import json
-import threading
-import time
-import mimetypes
+"""HTTP views for the radiator application."""
 
-import paho.mqtt.client as mqtt
+from __future__ import annotations
+
+import json
+import time
+from pathlib import Path
+
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.template import loader
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt
 
-from .fonction import *
-from .MQTTClient import MQTTClient
-from .parametres import IP_MQTT, TOPIC_MQTT, LISTE_RADIATEUR
+from .runtime import get_cached_states, get_mqtt_client
+from .services import (
+    demander_etat_au_appareil,
+    enregistrer_log,
+    envoyer_changement_etat_mqtt,
+)
 
-global mqtt_client, liste_etat
+DATA_FILE_PATH = Path(__file__).resolve().parent / "templates" / "data.json"
 
 
-
-# Affichage page de planning
 @csrf_exempt
 @never_cache
 def planning(request):
-    enregistrer_log("Requete page 'planning'")
-    json_path = "radiateur/templates/data.json"
-    with open(json_path) as f:
-        data = f.read()
-    return render(request, 'planning.html', {'data': data})
+    """Render the planning page along with the JSON payload."""
 
-# Affichage page index
+    enregistrer_log("Requete page 'planning'")
+    if not DATA_FILE_PATH.exists():
+        DATA_FILE_PATH.write_text("[]", encoding="utf-8")
+
+    data = DATA_FILE_PATH.read_text(encoding="utf-8")
+    return render(request, "planning.html", {"data": data})
+
+
 @csrf_exempt
 def index(request):
+    """Render the main dashboard page."""
+
     enregistrer_log("Requete page 'index'")
     return HttpResponse(loader.get_template("index.html").render({}))
 
 
-# Gestion requete modification du planning
-@never_cache
 @csrf_exempt
+@never_cache
 def maj_json(request):
+    """Persist the planning JSON received from the front-end."""
+
     enregistrer_log("Reception requete modification planning")
-    data = request.body.decode('utf-8')
-    data = data[1:-1]
-    data= json.loads(f"[{data}]")
+    raw_body = request.body.decode("utf-8")
+    try:
+        payload = json.loads(raw_body)
+    except json.JSONDecodeError:
+        trimmed = raw_body.strip()
+        if len(trimmed) > 2:
+            try:
+                payload = json.loads(f"[{trimmed[1:-1]}]")
+            except Exception:
+                return HttpResponse(status=400)
+        else:
+            return HttpResponse(status=400)
 
-    with open("radiateur/templates/data.json", "w") as file:
-        json.dump(data, file, indent=4)
-
-    return HttpResponse(200)
+    DATA_FILE_PATH.write_text(json.dumps(payload, indent=4), encoding="utf-8")
+    return HttpResponse(status=200)
 
 
 @csrf_exempt
 def changement_etat(request):
+    """Handle state change requests sent from the UI."""
+
     enregistrer_log("Reception requete modification état")
-    mode = json.loads(request.body)['mode']
-    retour = envoyer_changement_etat_mqtt(mode, mqtt_client)
-    if retour:
-        return HttpResponse(status=200)
-    else:
+    client = get_mqtt_client()
+    if client is None:
+        return HttpResponse(status=503)
+
+    mode = json.loads(request.body.decode("utf-8")).get("mode")
+    if not mode:
         return HttpResponse(status=400)
+
+    retour = envoyer_changement_etat_mqtt(mode, client)
+    return HttpResponse(status=200 if retour else 503)
 
 
 @csrf_exempt
 def retourner_etat(request):
-    global mqtt_client
-    demander_etat_au_appareil(mqtt_client)
-    time.sleep(0.01)
-    return JsonResponse(liste_etat)
+    """Return the latest device states after requesting them from MQTT."""
 
+    client = get_mqtt_client()
+    if client is None:
+        enregistrer_log("Impossible de retourner l'état: client MQTT indisponible")
+        return JsonResponse(get_cached_states())
 
-
-enregistrer_log("Démarrage du serveur")
-
-# Création de la liste des état
-liste_etat = {}
-for radiateur in LISTE_RADIATEUR:
-    liste_etat[radiateur] = "DEFAULT"
-# Envoie de cette liste au programme fonction.py
-set_liste_etat(liste_etat)
-
-try:
-    # Client MQTTT pour envoyer les requetes
-    mqtt_client = MQTTClient(IP_MQTT)
-    mqtt_client.subscribe(TOPIC_MQTT)
-    enregistrer_log("CLient MQTT connecté")
-except Exception as e:
-    enregistrer_log("Impossible de joindre le serveur MQTT")
-    enregistrer_log("Fermeture du programme")
-    sys.exit()
-
-# Thread pour mettre suivre les instructions du planning
-t = threading.Thread(target=maj_etat_selon_planning, args=(mqtt_client,)).start()
-
-# Temporaire
-# Enregistre l'heure chaque minutes avant de voir à quel moment le serveur s'arrête
-def TEMPORAIRE_log_heure():
-    while True:
-        heure_actuelle = datetime.now(paris_tz).strftime("%Y-%m-%d %H:%M:%S")
-        with open("TEMPORAIRE_log", "a") as f:
-            f.write(heure_actuelle + "\n")
-        time.sleep(60)
-
-t2 = threading.Thread(target=TEMPORAIRE_log_heure).start()
-
-# Thread pour mettre à jour les états
-# thread_etat = threading.Thread(target=boucle_demander_etat_appareil, args=(mqtt_client,)).start()
+    demander_etat_au_appareil(client)
+    time.sleep(0.05)
+    return JsonResponse(get_cached_states())

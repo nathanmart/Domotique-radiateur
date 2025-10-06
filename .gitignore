@@ -1,0 +1,4 @@
+__pycache__/
+*.py[cod]
+logs/
+db.sqlite3
