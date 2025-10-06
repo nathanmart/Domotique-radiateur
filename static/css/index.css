@@ -1,45 +1,45 @@
-body {
-    background-color: #f8f9fa;
+.main-panel {
+    max-width: 420px;
+    margin: 0 auto;
+    min-height: 100vh;
 }
 
-.page-actions .btn {
-    font-size: 1.1rem;
-    border-width: 2px;
+.btn-icon {
+    padding: 0.4rem 0.65rem;
+    font-size: 0.8rem;
 }
 
-.mode-section .btn {
-    font-size: 1.05rem;
-    font-weight: 600;
-    border-width: 2px;
-}
-
-.status-section .status-card {
+.mode-section,
+.status-section {
     border: none;
-    border-radius: 1rem;
+    border-radius: 0.75rem;
+    box-shadow: 0 4px 18px rgba(31, 41, 55, 0.08);
 }
 
-.status-section .card-body {
-    padding: 1.25rem;
-}
-
-.status-section .room-name {
-    font-size: 1.1rem;
+.btn-mode {
+    padding: 0.75rem 0.5rem;
+    font-size: 0.9rem;
     font-weight: 600;
-    color: #212529;
+    border: 1px solid #ced4da;
 }
 
-.status-section .status-icon {
-    width: 64px;
-    height: auto;
+.btn-mode:hover,
+.btn-check:checked + .btn-mode {
+    background-color: #0d6efd;
+    color: #fff;
+    border-color: #0d6efd;
 }
 
-@media (min-width: 576px) {
-    .page-actions .btn,
-    .mode-section .btn {
-        font-size: 1.15rem;
-    }
+.status-row + .status-row {
+    margin-top: 0.75rem;
+}
 
-    .status-section .room-name {
-        font-size: 1.2rem;
-    }
+.status-row {
+    font-size: 0.95rem;
+}
+
+.status-icon {
+    width: 42px;
+    height: 42px;
+    object-fit: contain;
 }

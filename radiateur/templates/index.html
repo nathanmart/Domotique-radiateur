@@ -18,63 +18,56 @@
 <div id="image_cache_HORS GEL" data-image-url="{% static 'img/logo_hors_gel.webp' %}" style="display: none;"></div>
 <div id="image_cache_OFF" data-image-url="{% static 'img/logo_off.webp' %}" style="display: none;"></div>
 
-<div class="container py-4">
-    <header class="text-center mb-4">
-        <h1 class="display-6 fw-semibold text-dark mb-0">Contrôle Domotique</h1>
-        <p class="text-muted mt-1 small">Pilotez vos radiateurs en un geste</p>
-    </header>
-
-    <div class="row g-3 page-actions">
-        <div class="col-6">
-            <button id="boutonPlanning" type="button" class="btn btn-outline-primary w-100 py-3">Planning</button>
-        </div>
-        <div class="col-6">
-            <button id="boutonOption" type="button" class="btn btn-outline-secondary w-100 py-3">Options</button>
+<div class="container-fluid main-panel py-3">
+    <div class="d-flex align-items-center justify-content-between mb-3">
+        <h1 class="h5 text-dark mb-0">Contrôle</h1>
+        <div class="d-flex gap-2">
+            <button id="boutonPlanning" type="button" class="btn btn-outline-primary btn-icon">Planning</button>
+            <button id="boutonOption" type="button" class="btn btn-outline-secondary btn-icon">Options</button>
         </div>
     </div>
 
-    <section class="card mt-4 mode-section">
-        <div class="card-body">
-            <h2 class="h5 text-center mb-3">Mode global</h2>
+    <section class="card mode-section mb-3">
+        <div class="card-body py-3">
+            <h2 class="h6 text-center text-muted mb-2">Mode</h2>
             <div class="row g-2">
                 <div class="col-6">
                     <input type="radio" class="btn-check" name="modeSelect" id="mode-comfort" value="COMFORT" autocomplete="off" onclick="envoyer_etat()">
-                    <label class="btn btn-primary w-100 py-3" for="mode-comfort">Confort</label>
+                    <label class="btn btn-light w-100 btn-mode" for="mode-comfort">
+                        <span>Confort</span>
+                    </label>
                 </div>
                 <div class="col-6">
                     <input type="radio" class="btn-check" name="modeSelect" id="mode-eco" value="ECO" autocomplete="off" onclick="envoyer_etat()">
-                    <label class="btn btn-success w-100 py-3" for="mode-eco">Éco</label>
+                    <label class="btn btn-light w-100 btn-mode" for="mode-eco">
+                        <span>Éco</span>
+                    </label>
                 </div>
                 <div class="col-6">
                     <input type="radio" class="btn-check" name="modeSelect" id="mode-horsgel" value="HORSGEL" autocomplete="off" onclick="envoyer_etat()">
-                    <label class="btn btn-warning w-100 py-3" for="mode-horsgel">Hors gel</label>
+                    <label class="btn btn-light w-100 btn-mode" for="mode-horsgel">
+                        <span>Hors gel</span>
+                    </label>
                 </div>
                 <div class="col-6">
                     <input type="radio" class="btn-check" name="modeSelect" id="mode-off" value="OFF" autocomplete="off" onclick="envoyer_etat()">
-                    <label class="btn btn-outline-dark w-100 py-3" for="mode-off">Off</label>
+                    <label class="btn btn-light w-100 btn-mode" for="mode-off">
+                        <span>Off</span>
+                    </label>
                 </div>
             </div>
         </div>
     </section>
 
-    <section class="status-section mt-4">
-        <h2 class="h6 text-uppercase text-muted mb-3">État des pièces</h2>
-        <div class="row g-3">
-            <div class="col-12">
-                <div class="card shadow-sm status-card">
-                    <div class="card-body d-flex align-items-center justify-content-between">
-                        <span class="room-name">Chambre</span>
-                        <img id="Chambre" src="{% static 'img/logo_erreur.webp' %}" alt="ERREUR" class="status-icon">
-                    </div>
-                </div>
+    <section class="card status-section">
+        <div class="card-body py-3">
+            <div class="d-flex align-items-center justify-content-between status-row">
+                <span class="room-name">Chambre</span>
+                <img id="Chambre" src="{% static 'img/logo_erreur.webp' %}" alt="ERREUR" class="status-icon">
             </div>
-            <div class="col-12">
-                <div class="card shadow-sm status-card">
-                    <div class="card-body d-flex align-items-center justify-content-between">
-                        <span class="room-name">Cuisine</span>
-                        <img id="Cuisine" src="{% static 'img/logo_erreur.webp' %}" alt="ERREUR" class="status-icon">
-                    </div>
-                </div>
+            <div class="d-flex align-items-center justify-content-between status-row">
+                <span class="room-name">Cuisine</span>
+                <img id="Cuisine" src="{% static 'img/logo_erreur.webp' %}" alt="ERREUR" class="status-icon">
             </div>
         </div>
     </section>
