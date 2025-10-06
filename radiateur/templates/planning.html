@@ -1,217 +1,690 @@
 {% load static %}
 <!DOCTYPE html>
-<html>
+<html lang="fr">
+    <head>
+        <meta charset="utf-8">
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+        >
+        <title>Contrôle radiateur - Planning</title>
+        <link rel="stylesheet" href="{% static 'bootstrap-5.3.8-dist/css/bootstrap.min.css' %}">
+        <link rel="stylesheet" href="{% static 'css/planning.css' %}">
+    </head>
+    <body class="bg-light">
+        <script id="schedule-data" type="application/json">{{ data|safe }}</script>
+        <div class="container py-4 planning-container">
+            <div class="d-flex flex-column gap-3 gap-md-4 mb-4">
+                <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-md-between gap-3">
+                    <div>
+                        <h1 class="h3 mb-0">Planning hebdomadaire</h1>
+                    </div>
+                    <div class="d-flex flex-column flex-sm-row gap-2 w-100 w-md-auto">
+                        <a class="btn btn-outline-secondary flex-fill" href="/">Retour au tableau de bord</a>
+                    </div>
+                </div>
+            </div>
 
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+            <div class="planning-panel">
+                <div class="day-switcher">
+                    <button class="btn btn-outline-secondary day-switcher-btn" type="button" id="prevDay" aria-label="Jour précédent">
+                        <span aria-hidden="true">&larr;</span>
+                    </button>
+                    <div class="day-switcher-label text-center">
+                        <div class="fw-semibold" id="currentDayLabel">Lundi</div>
+                    </div>
+                    <button class="btn btn-outline-secondary day-switcher-btn" type="button" id="nextDay" aria-label="Jour suivant">
+                        <span aria-hidden="true">&rarr;</span>
+                    </button>
+                </div>
 
-    <title>
-        Controle radiateur - Planning
-    </title>
+                <div class="timeline-wrapper">
+                    <div class="timeline-hours" id="timelineHours"></div>
+                    <div class="timeline-track" id="dayTrack" data-day="monday"></div>
+                </div>
 
-    <!-- Mobiscroll JS and CSS Includes -->
-    <link rel="stylesheet" href="{% static "css/mobiscroll.javascript.min.css" %}">
-    <script src="{% static "js/mobiscroll.javascript.min.js" %}"></script>
-
-    <link rel="stylesheet" href="{% static "css/planning.css" %}">
-
-    <style>
-            body {
-        margin: 0;
-        padding: 0;
-    }
-
-    body,
-    html {
-        height: 100%;
-    }
-
-    </style>
-
-</head>
-
-<body>
-    <div id="jsonData" style="display: none;">
-        <!-- Affichage des données JSON -->
-        {{ data|safe }}
-    </div>
-    <div mbsc-page class="demo-responsive-day-week-schedule">
-        <div style="height:100%">
-                <div id="demo"></div>
+            </div>
         </div>
-    </div>
 
-    <script>
-        function getCookie(name) {
-            let cookieValue = null;
-            if (document.cookie && document.cookie !== '') {
-                const cookies = document.cookie.split(';');
-                for (let i = 0; i < cookies.length; i++) {
-                    const cookie = cookies[i].trim();
-                    if (cookie.startsWith(name + '=')) {
-                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-                        break;
+        <div id="statusToast" class="status-toast" role="status" aria-live="polite"></div>
+
+        <script src="{% static 'bootstrap-5.3.8-dist/js/bootstrap.bundle.min.js' %}"></script>
+        <script>
+            const DAYS = [
+                { key: 'monday', label: 'Lundi' },
+                { key: 'tuesday', label: 'Mardi' },
+                { key: 'wednesday', label: 'Mercredi' },
+                { key: 'thursday', label: 'Jeudi' },
+                { key: 'friday', label: 'Vendredi' },
+                { key: 'saturday', label: 'Samedi' },
+                { key: 'sunday', label: 'Dimanche' },
+            ];
+
+            const MINUTES_IN_DAY = 24 * 60;
+            const SLOT_MIN_DURATION = 15;
+            const EDGE_RESIZE_GUTTER = 32;
+            const TIMELINE_BOTTOM_MARGIN = 24;
+            const MIN_TIMELINE_HEIGHT = 360;
+
+            const scheduleBoard = document.getElementById('dayTrack');
+            const timelineHours = document.getElementById('timelineHours');
+            const statusToast = document.getElementById('statusToast');
+            const prevButton = document.getElementById('prevDay');
+            const nextButton = document.getElementById('nextDay');
+            const currentDayLabel = document.getElementById('currentDayLabel');
+            const timelineWrapper = document.querySelector('.timeline-wrapper');
+            const planningPanel = document.querySelector('.planning-panel');
+
+            let statusTimeout = null;
+            let currentDayIndex = 0;
+            let activeInteraction = null;
+            const CREATE_HOLD_DELAY = 200;
+            const CREATE_MOVE_THRESHOLD = 8;
+            let pixelsPerMinute = 1;
+            let pendingTimelineRefresh = false;
+            let autoSaveTimeout = null;
+
+            function showStatus(message, type = 'info', autoHide = true) {
+                statusToast.textContent = message;
+                statusToast.className = `status-toast status-toast-${type} status-toast-visible`;
+                if (autoHide) {
+                    if (statusTimeout) {
+                        clearTimeout(statusTimeout);
+                    }
+                    statusTimeout = setTimeout(() => {
+                        hideStatus();
+                    }, 3500);
+                } else if (statusTimeout) {
+                    clearTimeout(statusTimeout);
+                    statusTimeout = null;
+                }
+            }
+
+            function hideStatus() {
+                if (statusTimeout) {
+                    clearTimeout(statusTimeout);
+                    statusTimeout = null;
+                }
+                statusToast.classList.remove('status-toast-visible');
+            }
+
+            function getCookie(name) {
+                let cookieValue = null;
+                if (document.cookie && document.cookie !== '') {
+                    const cookies = document.cookie.split(';');
+                    for (let i = 0; i < cookies.length; i += 1) {
+                        const cookie = cookies[i].trim();
+                        if (cookie.startsWith(name + '=')) {
+                            cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                            break;
+                        }
                     }
                 }
-            }
-            return cookieValue;
-        }
-
-        // Ajout des boutons en haut
-        function ajout_bouton() {
-            var emplacements = document.getElementsByClassName("mbsc-flex mbsc-flex-1-1 mbsc-calendar-title-wrapper mbsc-ios");
-
-            // Créer le div conteneur
-            var div = document.createElement('div');
-            div.className = 'mbsc-button-group-justified';
-
-            // Créer le premier bouton
-            var boutonPlanning = document.createElement('button');
-            boutonPlanning.id = 'boutonManuel';
-            boutonPlanning.setAttribute('mbsc-button', '');
-            boutonPlanning.setAttribute('data-theme', 'ios');
-            boutonPlanning.setAttribute('data-color', 'info');
-            boutonPlanning.setAttribute('data-icon', 'home');
-
-            // Créer le deuxième bouton
-            var boutonOptions = document.createElement('button');
-            boutonOptions.id = "boutonOption"
-            boutonOptions.setAttribute('mbsc-button', '');
-            boutonOptions.setAttribute('data-theme', 'ios');
-            boutonOptions.setAttribute('data-color', 'info');
-            boutonOptions.setAttribute('data-icon', 'cogs');
-
-            // Ajouter les boutons au div
-            div.appendChild(boutonPlanning);
-            div.appendChild(boutonOptions);
-
-            for(var i = 0; i < emplacements.length; i++) {
-                emplacements[i].appendChild(div.cloneNode(true));
+                return cookieValue;
             }
 
-        }
-
-
-        // Envoie au serveur des données mise à jour
-        function envoyer_donnee(event, inst){
-            var donnee = inst.getEvents();
-
-            // Formatage des heures pour éviter les problèmes de décalage horaire
-            donnee = JSON.stringify(donnee, function(key, value) {
-                if (key === 'start' || key === 'end') {
-                    // Convertir la chaîne de date ISO 8601 en objet Date
-                    var date = new Date(value);
-                    // Récupérer les composantes de la date (année, mois, jour, heure, minute, seconde)
-                    var year = date.getFullYear();
-                    var month = ('0' + (date.getMonth() + 1)).slice(-2); // Les mois sont indexés à partir de 0
-                    var day = ('0' + date.getDate()).slice(-2);
-                    var hours = ('0' + date.getHours()).slice(-2);
-                    var minutes = ('0' + date.getMinutes()).slice(-2);
-                    var seconds = ('0' + date.getSeconds()).slice(-2);
-                    // Construire la chaîne de date au format "YYYY-MM-DDTHH:MM:SS"
-                    return year + '-' + month + '-' + day + 'T' + hours + ':' + minutes + ':' + seconds;
-                }
-                return value;
-            });
-            console.log("LES DONNEES MODIFIE SONT");
-            console.log(donnee);
-            var xhr = new XMLHttpRequest();
-            xhr.open('POST', '/maj_json', true);
-            xhr.setRequestHeader('X-CSRFToken', getCookie('csrftoken'));
-            xhr.responseType = "blob";
-            xhr.onload = function(){
-                if (this.status === 200){
-                    console.log("Bien envoyé");
-                    mobiscroll.toast({
-                        message: 'Mise à jour bien envoyée au serveur'
-                    });
-                } else{
-                    console.log("Erreur d'envoie: " + str(this.status));
-                    mobiscroll.toast({
-                        message: 'Echecs de l\'envoie de la mise à jour au serveur'
-                    });
-                }
-            };
-            xhr.send(donnee);
-        }
-
-
-        mobiscroll.setOptions({
-            theme: 'ios',
-            locale: mobiscroll.localeFr
-        });
-
-        var inst = mobiscroll.eventcalendar('#demo', {
-            locale: mobiscroll.localeFr,  // Specify language like: locale: mobiscroll.localePl or omit setting to use default
-            theme: 'ios',                 // Specify theme like: theme: 'ios' or omit setting to use default
-            themeVariant: 'light',        // More info about themeVariant: https://docs.mobiscroll.com/5-28-3/javascript/eventcalendar#opt-themeVariant
-            responsive: {                 // More info about responsive: https://docs.mobiscroll.com/5-28-3/javascript/eventcalendar#opt-responsive
-                xsmall: {
-                    view: {               // More info about view: https://docs.mobiscroll.com/5-28-3/javascript/eventcalendar#opt-view
-                        schedule: {
-                            type: 'week',
-                            allDay: false
-                        }
-                    },
-
-                },
-
-            },
-            clickToCreate: true,
-            dragToCreate: true,
-            dragToMove: true,
-            dragToResize: true,
-            dragTimeStep: 30,
-            eventDelete: true,
-            eventOverlap: false,
-            actionableEvents: true,
-            showEventTooltip: true,
-
-            onEventClick: function (event, inst){
-                mobiscroll.confirm({
-                    title: 'Supprimer ?',
-                    message: 'Voulez-vous supprimer cette selection ?',
-                    okText: 'Agree',
-                    cancelText: 'Disagree',
-                    callback: function (result) {
-                        if (result === true) {
-                            inst.removeEvent(event.event.id);
-                            envoyer_donnee(event, inst);
-                        }
+            function ensureScheduleStructure(rawData) {
+                const schedule = {};
+                DAYS.forEach(({ key }) => {
+                    if (!rawData || !Array.isArray(rawData[key])) {
+                        schedule[key] = [];
+                    } else {
+                        schedule[key] = rawData[key]
+                            .filter((entry) => entry && typeof entry.start === 'string' && typeof entry.end === 'string')
+                            .map((entry) => ({ start: entry.start, end: entry.end }));
                     }
                 });
-            },
-
-            onEventUpdated: function (event, inst){
-                envoyer_donnee(event, inst);
-            },
-
-            onEventDelete: function (event, inst) {
-                envoyer_donnee(event, inst);
-            },
-
-            onEventCreated: function (event, inst){
-                envoyer_donnee(event, inst);
+                return schedule;
             }
-        });
 
-        var jsonData = JSON.parse(document.getElementById("jsonData").textContent);
+            function minutesToPixels(totalMinutes) {
+                return totalMinutes * pixelsPerMinute;
+            }
 
-        for (var key in jsonData){
-            console.log(jsonData[key]);
-            inst.addEvent(jsonData[key]);
-        }
+            function clampMinutes(minutes) {
+                return Math.max(0, Math.min(MINUTES_IN_DAY, minutes));
+            }
 
-       ajout_bouton();
+            function snapMinutes(minutes, step = SLOT_MIN_DURATION) {
+                return Math.round(minutes / step) * step;
+            }
 
-        document.getElementById('boutonManuel').addEventListener('click', function() {
-            window.location.href = '/';
-        });
+            function minutesToTime(minutes) {
+                const hours = Math.floor(minutes / 60).toString().padStart(2, '0');
+                const mins = Math.floor(minutes % 60).toString().padStart(2, '0');
+                return `${hours}:${mins}`;
+            }
 
-    </script>
+            function timeToMinutes(timeString) {
+                const [hours, minutes] = timeString.split(':');
+                return Number.parseInt(hours, 10) * 60 + Number.parseInt(minutes, 10);
+            }
 
+            function pointerMinutes(event) {
+                const rect = scheduleBoard.getBoundingClientRect();
+                const offsetY = event.clientY - rect.top;
+                return clampMinutes(offsetY / Math.max(pixelsPerMinute, 0.0001));
+            }
 
-</body>
+            function sortSlots(slots) {
+                return [...slots].sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
+            }
 
+            function renderHours() {
+                timelineHours.innerHTML = '';
+                const hourHeight = minutesToPixels(60);
+                for (let hour = 0; hour < 24; hour += 1) {
+                    const hourRow = document.createElement('div');
+                    hourRow.className = 'timeline-hour';
+                    hourRow.textContent = `${hour.toString().padStart(2, '0')}:00`;
+                    hourRow.style.height = `${hourHeight}px`;
+                    timelineHours.appendChild(hourRow);
+                }
+                const endMarker = document.createElement('div');
+                endMarker.className = 'timeline-hour timeline-hour-end';
+                endMarker.textContent = '24:00';
+                timelineHours.appendChild(endMarker);
+            }
+
+            function updateTimelineMetrics() {
+                if (!timelineWrapper || !planningPanel) {
+                    return;
+                }
+                const viewportHeight = window.innerHeight;
+                const wrapperRect = timelineWrapper.getBoundingClientRect();
+                const panelRect = planningPanel.getBoundingClientRect();
+                const spaceBelow = panelRect.bottom - wrapperRect.bottom;
+                let available = viewportHeight - wrapperRect.top - spaceBelow - TIMELINE_BOTTOM_MARGIN;
+                if (!Number.isFinite(available)) {
+                    available = MIN_TIMELINE_HEIGHT;
+                }
+                if (available < MIN_TIMELINE_HEIGHT) {
+                    available = MIN_TIMELINE_HEIGHT;
+                }
+                timelineWrapper.style.height = `${available}px`;
+                scheduleBoard.style.height = `${available}px`;
+                timelineHours.style.height = `${available}px`;
+                pixelsPerMinute = available / MINUTES_IN_DAY;
+                scheduleBoard.style.setProperty('--timeline-hour-height', `${available / 24}px`);
+                renderHours();
+                renderCurrentDay();
+            }
+
+            function scheduleTimelineRefresh() {
+                if (pendingTimelineRefresh) {
+                    return;
+                }
+                pendingTimelineRefresh = true;
+                window.requestAnimationFrame(() => {
+                    pendingTimelineRefresh = false;
+                    updateTimelineMetrics();
+                });
+            }
+
+            function updateDayNavigation() {
+                currentDayLabel.textContent = DAYS[currentDayIndex].label;
+                scheduleBoard.dataset.day = DAYS[currentDayIndex].key;
+                prevButton.disabled = currentDayIndex === 0;
+                nextButton.disabled = currentDayIndex === DAYS.length - 1;
+            }
+
+            function updateSlotElement(block, startMinutes, endMinutes) {
+                const top = minutesToPixels(startMinutes);
+                const height = Math.max(minutesToPixels(endMinutes - startMinutes), minutesToPixels(SLOT_MIN_DURATION));
+                block.style.top = `${top}px`;
+                block.style.height = `${height}px`;
+                const timeLabel = block.querySelector('.slot-time');
+                if (timeLabel) {
+                    timeLabel.textContent = `${minutesToTime(startMinutes)} – ${minutesToTime(endMinutes)}`;
+                }
+            }
+
+            function renderCurrentDay() {
+                const dayKey = DAYS[currentDayIndex].key;
+                const slots = currentSchedule[dayKey] || [];
+                const sortedSlots = sortSlots(slots);
+                currentSchedule[dayKey] = sortedSlots;
+                scheduleBoard.innerHTML = '';
+
+                sortedSlots.forEach((slot, index) => {
+                    const startMinutes = timeToMinutes(slot.start);
+                    const endMinutes = timeToMinutes(slot.end);
+
+                    const block = document.createElement('div');
+                    block.className = 'slot';
+                    block.dataset.index = String(index);
+                    block.innerHTML = `
+                        <div class="slot-handle slot-handle-start" data-handle="start"></div>
+                        <div class="slot-content">
+                            <div class="slot-time">${slot.start} – ${slot.end}</div>
+                            <button class="btn btn-sm btn-light slot-delete" type="button" data-action="delete" aria-label="Supprimer le créneau">
+                                &times;
+                            </button>
+                        </div>
+                        <div class="slot-handle slot-handle-end" data-handle="end"></div>
+                    `;
+
+                    updateSlotElement(block, startMinutes, endMinutes);
+                    scheduleBoard.appendChild(block);
+                });
+            }
+
+            function persistSchedule(successMessage = 'Planning enregistré.', pendingMessage = 'Enregistrement en cours…') {
+                showStatus(pendingMessage, 'info', false);
+                return fetch('/maj_json', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCookie('csrftoken'),
+                    },
+                    body: JSON.stringify(currentSchedule),
+                })
+                    .then((response) => {
+                        if (!response.ok) {
+                            throw new Error('Réponse invalide');
+                        }
+                        showStatus(successMessage, 'success');
+                    })
+                    .catch(() => {
+                        showStatus("Erreur lors de l'enregistrement du planning.", 'danger');
+                    });
+            }
+
+            function scheduleAutoSave(successMessage = 'Planning enregistré automatiquement.') {
+                if (autoSaveTimeout) {
+                    clearTimeout(autoSaveTimeout);
+                }
+                autoSaveTimeout = window.setTimeout(() => {
+                    autoSaveTimeout = null;
+                    persistSchedule(successMessage, 'Enregistrement automatique en cours…');
+                }, 300);
+            }
+
+            function canPlaceSlot(dayKey, startMinutes, endMinutes, excludeIndex = null) {
+                if (endMinutes - startMinutes < SLOT_MIN_DURATION) {
+                    return false;
+                }
+                const slots = currentSchedule[dayKey] || [];
+                for (let i = 0; i < slots.length; i += 1) {
+                    if (excludeIndex !== null && i === excludeIndex) {
+                        continue;
+                    }
+                    const existing = slots[i];
+                    const existingStart = timeToMinutes(existing.start);
+                    const existingEnd = timeToMinutes(existing.end);
+                    if (Math.max(existingStart, startMinutes) < Math.min(existingEnd, endMinutes)) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+
+            function addSlot(dayKey, startMinutes, endMinutes) {
+                const slots = currentSchedule[dayKey] || [];
+                slots.push({ start: minutesToTime(startMinutes), end: minutesToTime(endMinutes) });
+                currentSchedule[dayKey] = sortSlots(slots);
+                renderCurrentDay();
+            }
+
+            function deleteSlot(dayKey, index) {
+                const slots = currentSchedule[dayKey] || [];
+                if (index < 0 || index >= slots.length) {
+                    return;
+                }
+                slots.splice(index, 1);
+                currentSchedule[dayKey] = slots;
+                renderCurrentDay();
+                scheduleAutoSave();
+            }
+
+            function beginMove(event, dayKey, index, block) {
+                const slots = currentSchedule[dayKey];
+                const slot = slots[index];
+                const startMinutes = timeToMinutes(slot.start);
+                const endMinutes = timeToMinutes(slot.end);
+                const duration = endMinutes - startMinutes;
+                const pointerStart = pointerMinutes(event);
+                const offset = pointerStart - startMinutes;
+
+                const previousEnd = index > 0 ? timeToMinutes(slots[index - 1].end) : 0;
+                const nextStart = index < slots.length - 1 ? timeToMinutes(slots[index + 1].start) : MINUTES_IN_DAY;
+
+                activeInteraction = {
+                    type: 'move',
+                    pointerId: event.pointerId,
+                    dayKey,
+                    index,
+                    element: block,
+                    captureTarget: block,
+                    duration,
+                    offset,
+                    minStart: previousEnd,
+                    maxStart: nextStart - duration,
+                    currentStart: startMinutes,
+                    currentEnd: endMinutes,
+                    originalStart: startMinutes,
+                    originalEnd: endMinutes,
+                };
+                block.setPointerCapture(event.pointerId);
+                event.preventDefault();
+            }
+
+            function beginResize(event, dayKey, index, block, handle) {
+                const slots = currentSchedule[dayKey];
+                const slot = slots[index];
+                const startMinutes = timeToMinutes(slot.start);
+                const endMinutes = timeToMinutes(slot.end);
+
+                const previousEnd = index > 0 ? timeToMinutes(slots[index - 1].end) : 0;
+                const nextStart = index < slots.length - 1 ? timeToMinutes(slots[index + 1].start) : MINUTES_IN_DAY;
+
+                activeInteraction = {
+                    type: handle === 'start' ? 'resize-start' : 'resize-end',
+                    pointerId: event.pointerId,
+                    dayKey,
+                    index,
+                    element: block,
+                    captureTarget: block,
+                    currentStart: startMinutes,
+                    currentEnd: endMinutes,
+                    originalStart: startMinutes,
+                    originalEnd: endMinutes,
+                    minStart: previousEnd,
+                    maxEnd: nextStart,
+                };
+                block.setPointerCapture(event.pointerId);
+                event.preventDefault();
+            }
+
+            function createTemporarySlotElement() {
+                const block = document.createElement('div');
+                block.className = 'slot slot-temporary';
+                block.innerHTML = `
+                    <div class="slot-handle slot-handle-start" data-handle="start"></div>
+                    <div class="slot-content">
+                        <div class="slot-time">--:-- – --:--</div>
+                    </div>
+                    <div class="slot-handle slot-handle-end" data-handle="end"></div>
+                `;
+                return block;
+            }
+
+            function beginCreateHold(event, dayKey) {
+                const pointerId = event.pointerId;
+                const anchorMinutes = snapMinutes(pointerMinutes(event));
+                const holdTimeout = window.setTimeout(() => {
+                    if (!activeInteraction || activeInteraction.type !== 'pending-create' || activeInteraction.pointerId !== pointerId) {
+                        return;
+                    }
+                    const block = createTemporarySlotElement();
+                    scheduleBoard.appendChild(block);
+                    const start = activeInteraction.anchor;
+                    const end = clampMinutes(start + SLOT_MIN_DURATION);
+                    activeInteraction.type = 'create';
+                    activeInteraction.element = block;
+                    activeInteraction.captureTarget = scheduleBoard;
+                    activeInteraction.currentStart = start;
+                    activeInteraction.currentEnd = end;
+                    updateSlotElement(block, start, end);
+                    try {
+                        scheduleBoard.setPointerCapture(pointerId);
+                    } catch (error) {
+                        /* Ignore */
+                    }
+                }, CREATE_HOLD_DELAY);
+
+                activeInteraction = {
+                    type: 'pending-create',
+                    pointerId,
+                    dayKey,
+                    anchor: anchorMinutes,
+                    holdTimeout,
+                    startClientY: event.clientY,
+                    captureTarget: null,
+                };
+            }
+
+            function updateMove(event) {
+                const pointer = clampMinutes(pointerMinutes(event) - activeInteraction.offset);
+                const snapped = snapMinutes(pointer);
+                const start = clampMinutes(Math.min(Math.max(snapped, activeInteraction.minStart), activeInteraction.maxStart));
+                const end = clampMinutes(start + activeInteraction.duration);
+                activeInteraction.currentStart = start;
+                activeInteraction.currentEnd = end;
+                updateSlotElement(activeInteraction.element, start, end);
+                event.preventDefault();
+            }
+
+            function updateResizeStart(event) {
+                const pointer = snapMinutes(clampMinutes(pointerMinutes(event)));
+                const maxStart = activeInteraction.currentEnd - SLOT_MIN_DURATION;
+                const start = Math.min(Math.max(pointer, activeInteraction.minStart), maxStart);
+                activeInteraction.currentStart = start;
+                updateSlotElement(activeInteraction.element, start, activeInteraction.currentEnd);
+                event.preventDefault();
+            }
+
+            function updateResizeEnd(event) {
+                const pointer = snapMinutes(clampMinutes(pointerMinutes(event)));
+                const minEnd = activeInteraction.currentStart + SLOT_MIN_DURATION;
+                const end = Math.max(Math.min(pointer, activeInteraction.maxEnd), minEnd);
+                activeInteraction.currentEnd = end;
+                updateSlotElement(activeInteraction.element, activeInteraction.currentStart, end);
+                event.preventDefault();
+            }
+
+            function updateCreate(event) {
+                const pointer = snapMinutes(clampMinutes(pointerMinutes(event)));
+                let start = Math.min(activeInteraction.anchor, pointer);
+                let end = Math.max(activeInteraction.anchor, pointer);
+                if (end - start < SLOT_MIN_DURATION) {
+                    end = start + SLOT_MIN_DURATION;
+                }
+                start = clampMinutes(start);
+                end = clampMinutes(end);
+                activeInteraction.currentStart = start;
+                activeInteraction.currentEnd = end;
+                updateSlotElement(activeInteraction.element, start, end);
+                event.preventDefault();
+            }
+
+            function commitMove() {
+                const { dayKey, index, currentStart, currentEnd } = activeInteraction;
+                currentSchedule[dayKey][index] = {
+                    start: minutesToTime(currentStart),
+                    end: minutesToTime(currentEnd),
+                };
+                renderCurrentDay();
+                scheduleAutoSave();
+            }
+
+            function commitResize() {
+                const { dayKey, index, currentStart, currentEnd } = activeInteraction;
+                currentSchedule[dayKey][index] = {
+                    start: minutesToTime(currentStart),
+                    end: minutesToTime(currentEnd),
+                };
+                renderCurrentDay();
+                scheduleAutoSave();
+            }
+
+            function commitCreate() {
+                const { dayKey, currentStart, currentEnd } = activeInteraction;
+                if (!canPlaceSlot(dayKey, currentStart, currentEnd)) {
+                    scheduleBoard.removeChild(activeInteraction.element);
+                    showStatus('Créneau impossible à ajouter à cet endroit (chevauchement).', 'warning');
+                    return;
+                }
+                addSlot(dayKey, currentStart, currentEnd);
+                scheduleAutoSave();
+            }
+
+            function cancelActiveInteraction() {
+                if (activeInteraction) {
+                    if (activeInteraction.holdTimeout) {
+                        window.clearTimeout(activeInteraction.holdTimeout);
+                    }
+                    if (activeInteraction.type === 'create' && activeInteraction.element && activeInteraction.element.parentNode) {
+                        activeInteraction.element.parentNode.removeChild(activeInteraction.element);
+                    }
+                    if (activeInteraction.captureTarget && activeInteraction.pointerId !== undefined) {
+                        try {
+                            activeInteraction.captureTarget.releasePointerCapture(activeInteraction.pointerId);
+                        } catch (error) {
+                            /* Ignore */
+                        }
+                    }
+                }
+                activeInteraction = null;
+            }
+
+            scheduleBoard.addEventListener('pointerdown', (event) => {
+                if (activeInteraction) {
+                    return;
+                }
+                const dayKey = DAYS[currentDayIndex].key;
+                const deleteButton = event.target.closest('button[data-action="delete"]');
+                if (deleteButton) {
+                    const block = deleteButton.closest('.slot');
+                    if (!block) {
+                        return;
+                    }
+                    const index = Number.parseInt(block.dataset.index, 10);
+                    deleteSlot(dayKey, index);
+                    return;
+                }
+
+                const handle = event.target.closest('[data-handle]');
+                const block = event.target.closest('.slot');
+                if (handle && block && !block.classList.contains('slot-temporary')) {
+                    const index = Number.parseInt(block.dataset.index, 10);
+                    beginResize(event, dayKey, index, block, handle.dataset.handle);
+                    return;
+                }
+
+                if (block && !block.classList.contains('slot-temporary')) {
+                    const index = Number.parseInt(block.dataset.index, 10);
+                    const rect = block.getBoundingClientRect();
+                    const offsetY = event.clientY - rect.top;
+                    const safeGutter = Math.min(EDGE_RESIZE_GUTTER, rect.height / 2);
+                    const nearTop = offsetY <= safeGutter;
+                    const nearBottom = rect.bottom - event.clientY <= safeGutter;
+                    if (nearTop && !nearBottom) {
+                        beginResize(event, dayKey, index, block, 'start');
+                        return;
+                    }
+                    if (nearBottom && !nearTop) {
+                        beginResize(event, dayKey, index, block, 'end');
+                        return;
+                    }
+                    beginMove(event, dayKey, index, block);
+                    return;
+                }
+
+                if (event.target === scheduleBoard) {
+                    beginCreateHold(event, dayKey);
+                }
+            });
+
+            scheduleBoard.addEventListener('pointermove', (event) => {
+                if (!activeInteraction || event.pointerId !== activeInteraction.pointerId) {
+                    return;
+                }
+                if (activeInteraction.type === 'pending-create') {
+                    if (Math.abs(event.clientY - activeInteraction.startClientY) > CREATE_MOVE_THRESHOLD) {
+                        cancelActiveInteraction();
+                        return;
+                    }
+                    activeInteraction.anchor = snapMinutes(pointerMinutes(event));
+                    return;
+                }
+                if (activeInteraction.type === 'move') {
+                    updateMove(event);
+                } else if (activeInteraction.type === 'resize-start') {
+                    updateResizeStart(event);
+                } else if (activeInteraction.type === 'resize-end') {
+                    updateResizeEnd(event);
+                } else if (activeInteraction.type === 'create') {
+                    updateCreate(event);
+                }
+            });
+
+            scheduleBoard.addEventListener('pointerup', (event) => {
+                if (!activeInteraction || event.pointerId !== activeInteraction.pointerId) {
+                    return;
+                }
+                if (activeInteraction.type === 'pending-create') {
+                    cancelActiveInteraction();
+                    return;
+                }
+                if (activeInteraction.type === 'move') {
+                    commitMove();
+                } else if (activeInteraction.type === 'resize-start' || activeInteraction.type === 'resize-end') {
+                    commitResize();
+                } else if (activeInteraction.type === 'create') {
+                    if (activeInteraction.currentEnd - activeInteraction.currentStart < SLOT_MIN_DURATION) {
+                        if (activeInteraction.element.parentNode) {
+                            activeInteraction.element.parentNode.removeChild(activeInteraction.element);
+                        }
+                    } else {
+                        commitCreate();
+                    }
+                }
+                cancelActiveInteraction();
+            });
+
+            scheduleBoard.addEventListener('pointercancel', () => {
+                if (!activeInteraction) {
+                    return;
+                }
+                if (activeInteraction.type === 'pending-create') {
+                    cancelActiveInteraction();
+                    return;
+                }
+                if (activeInteraction.type === 'create' && activeInteraction.element.parentNode) {
+                    activeInteraction.element.parentNode.removeChild(activeInteraction.element);
+                } else if (activeInteraction.type !== 'create' && activeInteraction.element) {
+                    updateSlotElement(
+                        activeInteraction.element,
+                        activeInteraction.originalStart,
+                        activeInteraction.originalEnd,
+                    );
+                }
+                cancelActiveInteraction();
+            });
+
+            prevButton.addEventListener('click', () => {
+                if (currentDayIndex > 0) {
+                    currentDayIndex -= 1;
+                    updateDayNavigation();
+                    renderCurrentDay();
+                }
+            });
+
+            nextButton.addEventListener('click', () => {
+                if (currentDayIndex < DAYS.length - 1) {
+                    currentDayIndex += 1;
+                    updateDayNavigation();
+                    renderCurrentDay();
+                }
+            });
+
+            const rawSchedule = JSON.parse(document.getElementById('schedule-data').textContent || '{}');
+            let currentSchedule = ensureScheduleStructure(rawSchedule);
+
+            updateDayNavigation();
+            updateTimelineMetrics();
+            scheduleTimelineRefresh();
+            hideStatus();
+
+            window.addEventListener('resize', scheduleTimelineRefresh);
+            window.addEventListener('orientationchange', scheduleTimelineRefresh);
+            if (window.ResizeObserver) {
+                const panelObserver = new ResizeObserver(() => {
+                    scheduleTimelineRefresh();
+                });
+                panelObserver.observe(planningPanel);
+            }
+        </script>
+    </body>
 </html>
