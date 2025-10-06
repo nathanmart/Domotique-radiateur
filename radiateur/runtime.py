@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import socket
+import subprocess
 import threading
+import time
 from typing import Optional
 
 from .config import MQTT_SETTINGS
@@ -18,6 +21,54 @@ _initialized = False
 _mqtt_client: Optional[MQTTClient] = None
 
 
+def _can_connect() -> bool:
+    """Return True when a TCP connection to the broker can be established."""
+
+    try:
+        with socket.create_connection(
+            (MQTT_SETTINGS.host, MQTT_SETTINGS.port), timeout=1
+        ):
+            return True
+    except OSError:
+        return False
+
+
+def _ensure_broker_running() -> None:
+    """Start the MQTT broker when possible if it's not already up."""
+
+    if _can_connect():
+        return
+
+    command = MQTT_SETTINGS.start_command
+    if not command:
+        return
+
+    try:
+        subprocess.Popen(
+            command,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception as exc:  # pragma: no cover - platform dependent
+        enregistrer_log(
+            "Impossible de démarrer le serveur MQTT automatiquement: %s" % exc
+        )
+        return
+
+    deadline = time.time() + MQTT_SETTINGS.start_timeout
+    while time.time() < deadline:
+        if _can_connect():
+            enregistrer_log(
+                "Serveur MQTT démarré via la commande configurée"
+            )
+            return
+        time.sleep(0.5)
+
+    enregistrer_log(
+        "Le serveur MQTT ne répond pas malgré la tentative de démarrage automatique"
+    )
+
+
 def initialize() -> None:
     """Initialize MQTT client and background workers once."""
 
@@ -29,6 +80,8 @@ def initialize() -> None:
         enregistrer_log("Démarrage du serveur")
         liste_initiale = {radiateur: "DEFAULT" for radiateur in MQTT_SETTINGS.devices}
         set_liste_etat(liste_initiale)
+
+        _ensure_broker_running()
 
         try:
             client = MQTTClient(
