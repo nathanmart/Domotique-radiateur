@@ -4,6 +4,10 @@
     min-height: 100vh;
 }
 
+.image-cache {
+    display: none;
+}
+
 .btn-icon {
     padding: 0.4rem 0.65rem;
     font-size: 0.8rem;
@@ -30,16 +34,53 @@
     border-color: #0d6efd;
 }
 
-.status-row + .status-row {
-    margin-top: 0.75rem;
+.radiator-card {
+    border: none;
+    border-radius: 0.75rem;
+    box-shadow: 0 4px 18px rgba(31, 41, 55, 0.08);
 }
 
-.status-row {
-    font-size: 0.95rem;
-}
-
-.status-icon {
-    width: 42px;
-    height: 42px;
+.radiator-card .status-icon {
+    width: 48px;
+    height: 48px;
     object-fit: contain;
+}
+
+.radiator-card .status-label {
+    font-size: 0.85rem;
+}
+
+.radiator-buttons .btn {
+    min-width: 82px;
+    font-size: 0.8rem;
+}
+
+.radiator-buttons .btn.active,
+.radiator-buttons .btn:focus {
+    background-color: #0d6efd;
+    color: #fff;
+    border-color: #0d6efd;
+}
+
+.radiator-card-disabled {
+    opacity: 0.85;
+}
+
+.badge-forced {
+    font-size: 0.7rem;
+}
+
+.option-card {
+    border: none;
+    border-radius: 0.75rem;
+    box-shadow: 0 4px 18px rgba(31, 41, 55, 0.08);
+}
+
+.option-description {
+    font-size: 0.85rem;
+    color: #6c757d;
+}
+
+.btn-placeholder {
+    width: 82px;
 }

@@ -9,15 +9,17 @@ from pathlib import Path
 
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
-from django.template import loader
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt
 
+from .config import MQTT_SETTINGS
 from .runtime import get_cached_states, get_mqtt_client
 from .services import (
     demander_etat_au_appareil,
     enregistrer_log,
     envoyer_changement_etat_mqtt,
+    load_disabled_states,
+    update_disabled_state,
 )
 
 DATA_FILE_PATH = Path(__file__).resolve().parent / "templates" / "data.json"
@@ -172,7 +174,21 @@ def index(request):
     """Render the main dashboard page."""
 
     enregistrer_log("Requete page 'index'")
-    return HttpResponse(loader.get_template("index.html").render({}))
+    disabled_states = load_disabled_states()
+    radiator_cards: list[tuple[str, bool]] = []
+    has_active_radiators = False
+    for radiator in MQTT_SETTINGS.devices:
+        is_disabled = disabled_states.get(radiator, False)
+        if not is_disabled:
+            has_active_radiators = True
+        radiator_cards.append((radiator, is_disabled))
+    context = {
+        "radiators": MQTT_SETTINGS.devices,
+        "disabled_states": disabled_states,
+        "radiator_cards": radiator_cards,
+        "has_active_radiators": has_active_radiators,
+    }
+    return render(request, "index.html", context)
 
 
 @csrf_exempt
@@ -202,12 +218,28 @@ def changement_etat(request):
     if client is None:
         return HttpResponse(status=503)
 
-    mode = json.loads(request.body.decode("utf-8")).get("mode")
-    if not mode:
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except json.JSONDecodeError:
         return HttpResponse(status=400)
 
-    retour = envoyer_changement_etat_mqtt(mode, client)
-    return HttpResponse(status=200 if retour else 503)
+    mode = payload.get("mode")
+    if not isinstance(mode, str):
+        return HttpResponse(status=400)
+
+    radiator = payload.get("radiator")
+    if radiator:
+        if radiator not in MQTT_SETTINGS.devices:
+            return HttpResponse(status=400)
+        liste_radiateur: list[str] | None = [radiator]
+    else:
+        liste_radiateur = None
+
+    retour = envoyer_changement_etat_mqtt(mode, client, liste_radiateur)
+    if retour is None:
+        return HttpResponse(status=503)
+
+    return JsonResponse({"applied_modes": retour, "disabled": load_disabled_states()})
 
 
 @csrf_exempt
@@ -217,8 +249,50 @@ def retourner_etat(request):
     client = get_mqtt_client()
     if client is None:
         enregistrer_log("Impossible de retourner l'état: client MQTT indisponible")
-        return JsonResponse(get_cached_states())
+        return JsonResponse({"states": get_cached_states(), "disabled": load_disabled_states()})
 
     demander_etat_au_appareil(client)
     time.sleep(0.05)
-    return JsonResponse(get_cached_states())
+    return JsonResponse({"states": get_cached_states(), "disabled": load_disabled_states()})
+
+
+@csrf_exempt
+def options(request):
+    """Display and update the options page allowing per-radiator overrides."""
+
+    if request.method == "POST":
+        try:
+            payload = json.loads(request.body.decode("utf-8"))
+        except json.JSONDecodeError:
+            return HttpResponse(status=400)
+
+        radiator = payload.get("radiator")
+        if not isinstance(radiator, str) or radiator not in MQTT_SETTINGS.devices:
+            return HttpResponse(status=400)
+
+        disabled = bool(payload.get("disabled", False))
+        try:
+            updated_map = update_disabled_state(radiator, disabled)
+        except KeyError:
+            return HttpResponse(status=400)
+
+        client = get_mqtt_client()
+        if disabled and client is not None:
+            envoyer_changement_etat_mqtt("ECO", client, [radiator])
+
+        enregistrer_log(
+            f"Mise à jour option radiateur {radiator}: {'désactivé' if disabled else 'activé'}"
+        )
+        return JsonResponse({"disabled": updated_map})
+
+    enregistrer_log("Requete page 'options'")
+    disabled_states = load_disabled_states()
+    context = {
+        "radiators": MQTT_SETTINGS.devices,
+        "disabled_states": disabled_states,
+        "radiator_options": [
+            (radiator, disabled_states.get(radiator, False))
+            for radiator in MQTT_SETTINGS.devices
+        ],
+    }
+    return render(request, "options.html", context)

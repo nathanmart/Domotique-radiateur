@@ -11,12 +11,16 @@
     <link rel="stylesheet" href="{% static 'css/index.css' %}">
 </head>
 <body class="bg-light">
-<div id="image_cache_COMFORT" data-image-url="{% static 'img/logo_confort.webp' %}" style="display: none;"></div>
-<div id="image_cache_ECO" data-image-url="{% static 'img/logo_eco.webp' %}" style="display: none;"></div>
-<div id="image_cache_None" data-image-url="{% static 'img/logo_erreur.webp' %}" style="display: none;"></div>
-<div id="image_cache_ERROR" data-image-url="{% static 'img/logo_erreur.webp' %}" style="display: none;"></div>
-<div id="image_cache_HORS GEL" data-image-url="{% static 'img/logo_hors_gel.webp' %}" style="display: none;"></div>
-<div id="image_cache_OFF" data-image-url="{% static 'img/logo_off.webp' %}" style="display: none;"></div>
+<div class="image-cache" data-mode="COMFORT" data-image-url="{% static 'img/logo_confort.webp' %}"></div>
+<div class="image-cache" data-mode="ECO" data-image-url="{% static 'img/logo_eco.webp' %}"></div>
+<div class="image-cache" data-mode="HORS GEL" data-image-url="{% static 'img/logo_hors_gel.webp' %}"></div>
+<div class="image-cache" data-mode="HORSGEL" data-image-url="{% static 'img/logo_hors_gel.webp' %}"></div>
+<div class="image-cache" data-mode="OFF" data-image-url="{% static 'img/logo_off.webp' %}"></div>
+<div class="image-cache" data-mode="ERROR" data-image-url="{% static 'img/logo_erreur.webp' %}"></div>
+<div class="image-cache" data-mode="None" data-image-url="{% static 'img/logo_erreur.webp' %}"></div>
+
+{{ radiators|json_script:'radiator-list' }}
+{{ disabled_states|json_script:'radiator-disabled' }}
 
 <div class="container-fluid main-panel py-3">
     <div class="d-flex align-items-center justify-content-between mb-3">
@@ -29,28 +33,28 @@
 
     <section class="card mode-section mb-3">
         <div class="card-body py-3">
-            <h2 class="h6 text-center text-muted mb-2">Mode</h2>
+            <h2 class="h6 text-center text-muted mb-2">Mode global</h2>
             <div class="row g-2">
                 <div class="col-6">
-                    <input type="radio" class="btn-check" name="modeSelect" id="mode-comfort" value="COMFORT" autocomplete="off" onclick="envoyer_etat()">
+                    <input type="radio" class="btn-check" name="modeSelect" id="mode-comfort" value="COMFORT" autocomplete="off">
                     <label class="btn btn-light w-100 btn-mode" for="mode-comfort">
                         <span>Confort</span>
                     </label>
                 </div>
                 <div class="col-6">
-                    <input type="radio" class="btn-check" name="modeSelect" id="mode-eco" value="ECO" autocomplete="off" onclick="envoyer_etat()">
+                    <input type="radio" class="btn-check" name="modeSelect" id="mode-eco" value="ECO" autocomplete="off">
                     <label class="btn btn-light w-100 btn-mode" for="mode-eco">
                         <span>Éco</span>
                     </label>
                 </div>
                 <div class="col-6">
-                    <input type="radio" class="btn-check" name="modeSelect" id="mode-horsgel" value="HORSGEL" autocomplete="off" onclick="envoyer_etat()">
+                    <input type="radio" class="btn-check" name="modeSelect" id="mode-horsgel" value="HORSGEL" autocomplete="off">
                     <label class="btn btn-light w-100 btn-mode" for="mode-horsgel">
                         <span>Hors gel</span>
                     </label>
                 </div>
                 <div class="col-6">
-                    <input type="radio" class="btn-check" name="modeSelect" id="mode-off" value="OFF" autocomplete="off" onclick="envoyer_etat()">
+                    <input type="radio" class="btn-check" name="modeSelect" id="mode-off" value="OFF" autocomplete="off">
                     <label class="btn btn-light w-100 btn-mode" for="mode-off">
                         <span>Off</span>
                     </label>
@@ -59,84 +63,173 @@
         </div>
     </section>
 
-    <section class="card status-section">
-        <div class="card-body py-3">
-            <div class="d-flex align-items-center justify-content-between status-row">
-                <span class="room-name">Chambre</span>
-                <img id="Chambre" src="{% static 'img/logo_erreur.webp' %}" alt="ERREUR" class="status-icon">
+    {% for radiator, is_disabled in radiator_cards %}
+        <section class="card radiator-card mb-3 {% if is_disabled %}d-none{% endif %}" data-radiator-name="{{ radiator }}" data-initial-disabled="{{ is_disabled|yesno:'true,false' }}">
+            <div class="card-body">
+                <div class="d-flex align-items-center justify-content-between">
+                    <h2 class="h6 mb-0">{{ radiator }}</h2>
+                    <span class="badge text-bg-warning badge-forced d-none" data-role="forced-badge">Éco forcé</span>
+                </div>
+                <div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mt-3">
+                    <div class="radiator-status d-flex align-items-center gap-3">
+                        <img src="{% static 'img/logo_erreur.webp' %}" alt="Inconnu" class="status-icon" data-role="status-icon">
+                        <span class="status-label text-muted small" data-role="status-label">Inconnu</span>
+                    </div>
+                    <div class="radiator-buttons btn-group flex-wrap" role="group">
+                        <button type="button" class="btn btn-outline-primary" data-mode="COMFORT">Confort</button>
+                        <button type="button" class="btn btn-outline-primary" data-mode="ECO">Éco</button>
+                        <button type="button" class="btn btn-outline-primary" data-mode="HORSGEL">Hors gel</button>
+                        <button type="button" class="btn btn-outline-primary" data-mode="OFF">Off</button>
+                    </div>
+                </div>
             </div>
-            <div class="d-flex align-items-center justify-content-between status-row">
-                <span class="room-name">Cuisine</span>
-                <img id="Cuisine" src="{% static 'img/logo_erreur.webp' %}" alt="ERREUR" class="status-icon">
-            </div>
+        </section>
+    {% empty %}
+        <div class="alert alert-warning" role="alert">
+            Aucun radiateur n'est configuré.
         </div>
-    </section>
+    {% endfor %}
+    <div id="no-radiator-alert" class="alert alert-warning {% if has_active_radiators %}d-none{% endif %}" role="alert">
+        Aucun radiateur n'est disponible.
+    </div>
 </div>
 
 <script>
-    const modeSelect = document.getElementsByName("modeSelect")
-    const envoyerButton = document.getElementById("envoyerButton");
-    const checkerButton = document.getElementById("checkerButton");
-    const reponseServeur = document.getElementById("reponseServeur");
+    const radiators = JSON.parse(document.getElementById('radiator-list').textContent || '[]');
+    const disabledInitial = JSON.parse(document.getElementById('radiator-disabled').textContent || '{}');
+    const iconCache = {};
+    document.querySelectorAll('.image-cache').forEach((element) => {
+        iconCache[element.dataset.mode] = element.dataset.imageUrl;
+    });
 
-    function demander_etat(){
-        var xhr = new XMLHttpRequest();
+    const cards = {};
+    document.querySelectorAll('.radiator-card').forEach((card) => {
+        const name = card.dataset.radiatorName;
+        if (name) {
+            cards[name] = card;
+        }
+    });
 
-        xhr.open('POST', '/retourner_etat/', true);
-        xhr.setRequestHeader("X-CSRFToken", getCookie("csrftoken"));
-        xhr.responseType = "text"
+    const modeSelect = document.getElementsByName('modeSelect');
+    let lastStates = {};
+    let disabledStates = { ...disabledInitial };
 
-        xhr.onload = function (){
-            if (xhr.status === 200) { // Vérifiez que la requête s'est bien déroulée (statut HTTP 200 OK)
-                var responseText = xhr.responseText; // Récupérez le texte de la réponse JSON
-                var jsonData = JSON.parse(responseText); // Parsez le texte JSON en objet JavaScript
-                console.log(jsonData);
+    const LABELS = {
+        COMFORT: 'Confort',
+        ECO: 'Éco',
+        HORSGEL: 'Hors gel',
+        OFF: 'Arrêt',
+        ERROR: 'Erreur',
+        None: 'Inconnu',
+    };
 
-                radiateur = ["Chambre", "Cuisine"];
-                {#radiateur = ["Cuisine"];#}
-
-                for (let item of radiateur) {
-                    console.log(item);
-                    etat = jsonData[item];
-                    let emplacement = document.getElementById(item);
-                    console.log('image_cache_' + etat)
-                    var imageUrl = document.getElementById('image_cache_' + etat).getAttribute('data-image-url');
-                    emplacement.src = imageUrl;
-                }
-            }
-        };
-        xhr.send()
+    function toCanonicalState(state) {
+        if (!state) {
+            return 'None';
+        }
+        if (state === 'HORSGEL') {
+            return 'HORS GEL';
+        }
+        return state;
     }
 
-    function envoyer_etat(){
-        selectedMode = "None";
-        modeSelect.forEach((element, index) =>{
-            if (element.checked){
-                selectedMode = element.value
+    function normalizeState(state) {
+        if (!state) {
+            return 'None';
+        }
+        if (state === 'HORS GEL' || state === 'HORSGEL') {
+            return 'HORSGEL';
+        }
+        return state;
+    }
+
+    function resolveIcon(state) {
+        if (iconCache[state]) {
+            return iconCache[state];
+        }
+        const normalized = normalizeState(state);
+        if (normalized === 'HORSGEL' && iconCache['HORS GEL']) {
+            return iconCache['HORS GEL'];
+        }
+        return iconCache[normalized] || iconCache.None || '';
+    }
+
+    function updateGlobalSelection() {
+        const unique = new Set();
+        radiators.forEach((name) => {
+            if (disabledStates[name]) {
+                return;
             }
+            unique.add(normalizeState(lastStates[name]));
         });
-        var data = {
-            mode: selectedMode,
-        };
 
-        var xhr = new XMLHttpRequest();
-
-        xhr.open('POST', '/changement_etat/', true);
-        xhr.setRequestHeader("X-CSRFToken", getCookie("csrftoken"));
-        xhr.responseType = "blob"
-
-        xhr.onload = function (){
-            mobiscroll.toast({
-                message: 'Mode des radiateurs modifié',
-            });
-        };
-        xhr.send(JSON.stringify(data));
-
-        setTimeout(function() {
-            demander_etat();
-        }, 50);
+        modeSelect.forEach((input) => {
+            const value = input.value;
+            input.checked = unique.size === 1 && unique.has(value);
+        });
     }
 
+    function updateRadiatorCard(name) {
+        const card = cards[name];
+        if (!card) {
+            return;
+        }
+        const state = lastStates[name];
+        const disabled = Boolean(disabledStates[name]);
+        const normalized = normalizeState(state);
+
+        const iconElement = card.querySelector('[data-role="status-icon"]');
+        if (iconElement) {
+            const icon = resolveIcon(state);
+            if (icon) {
+                iconElement.src = icon;
+            }
+            iconElement.alt = LABELS[normalized] || LABELS.None;
+        }
+
+        const label = card.querySelector('[data-role="status-label"]');
+        if (label) {
+            label.textContent = LABELS[normalized] || LABELS.None;
+        }
+
+        const badge = card.querySelector('[data-role="forced-badge"]');
+        if (badge) {
+            badge.classList.toggle('d-none', !disabled);
+        }
+
+        card.classList.toggle('radiator-card-disabled', disabled);
+        card.classList.toggle('d-none', disabled);
+
+        card.querySelectorAll('[data-mode]').forEach((button) => {
+            const mode = button.dataset.mode;
+            const isActive = mode === normalized;
+            button.classList.toggle('active', isActive);
+            button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+            button.disabled = disabled && mode !== 'ECO';
+        });
+    }
+
+    function updateEmptyState() {
+        const alert = document.getElementById('no-radiator-alert');
+        if (!alert) {
+            return;
+        }
+        const hasVisibleCard = Object.values(cards).some((card) => !card.classList.contains('d-none'));
+        alert.classList.toggle('d-none', hasVisibleCard);
+    }
+
+    function applyStateSnapshot(partialStates = {}, partialDisabled = {}) {
+        Object.entries(partialStates).forEach(([name, state]) => {
+            lastStates[name] = toCanonicalState(state);
+        });
+        Object.entries(partialDisabled).forEach(([name, value]) => {
+            disabledStates[name] = Boolean(value);
+        });
+
+        radiators.forEach((name) => updateRadiatorCard(name));
+        updateEmptyState();
+        updateGlobalSelection();
+    }
 
     function getCookie(name) {
         let cookieValue = null;
@@ -153,15 +246,88 @@
         return cookieValue;
     }
 
-    document.getElementById('boutonPlanning').addEventListener('click', function() {
-        window.location.href = '/planning';
+    function envoyerMode(radiator, mode) {
+        const payload = { mode };
+        if (radiator) {
+            payload.radiator = radiator;
+        }
+
+        fetch('/changement_etat/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken'),
+            },
+            body: JSON.stringify(payload),
+        })
+            .then((response) => {
+                if (!response.ok) {
+                    throw new Error('Request failed');
+                }
+                return response.json();
+            })
+            .then((data) => {
+                applyStateSnapshot(data.applied_modes || {}, data.disabled || {});
+                const message = radiator
+                    ? `Mode mis à jour pour ${radiator}.`
+                    : 'Mode global appliqué.';
+                mobiscroll.toast({ message });
+                setTimeout(demanderEtat, 200);
+            })
+            .catch(() => {
+                mobiscroll.toast({ message: 'Impossible de modifier le mode. Réessayez plus tard.' });
+            });
+    }
+
+    function demanderEtat() {
+        fetch('/retourner_etat/', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCookie('csrftoken'),
+            },
+        })
+            .then((response) => {
+                if (!response.ok) {
+                    throw new Error('Request failed');
+                }
+                return response.json();
+            })
+            .then((data) => {
+                applyStateSnapshot(data.states || {}, data.disabled || {});
+            })
+            .catch(() => {
+                // Ignore fetch errors silently but keep UI responsive.
+            });
+    }
+
+    modeSelect.forEach((input) => {
+        input.addEventListener('change', (event) => {
+            if (event.target.checked) {
+                envoyerMode(null, event.target.value);
+            }
+        });
     });
 
-    demander_etat();
+    document.querySelectorAll('.radiator-buttons [data-mode]').forEach((button) => {
+        button.addEventListener('click', () => {
+            const card = button.closest('.radiator-card');
+            const radiator = card ? card.dataset.radiatorName : null;
+            if (radiator) {
+                envoyerMode(radiator, button.dataset.mode);
+            }
+        });
+    });
 
-    {#setInterval(demander_etat, 10000);#}
+    document.getElementById('boutonPlanning').addEventListener('click', () => {
+        window.location.href = '/planning/';
+    });
 
+    document.getElementById('boutonOption').addEventListener('click', () => {
+        window.location.href = '/options/';
+    });
 
+    applyStateSnapshot({}, disabledStates);
+    demanderEtat();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
 </body>
