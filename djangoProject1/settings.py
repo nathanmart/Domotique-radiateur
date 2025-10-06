@@ -142,6 +142,8 @@ MQTT_DEVICES = [
     for device in os.getenv("MQTT_DEVICES", "Cuisine,Chambre").split(",")
     if device.strip()
 ]
+MQTT_BROKER_START_COMMAND = os.getenv("MQTT_BROKER_START_COMMAND")
+MQTT_BROKER_START_TIMEOUT = float(os.getenv("MQTT_BROKER_START_TIMEOUT", "10"))
 
 LOG_DIRECTORY = Path(os.getenv("LOG_DIRECTORY") or (BASE_DIR / "logs"))
 LOG_DIRECTORY.mkdir(parents=True, exist_ok=True)

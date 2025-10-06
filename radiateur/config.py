@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Tuple
 
 import pytz
 from django.conf import settings
@@ -19,6 +19,8 @@ class MQTTSettings:
     topic: str
     devices: List[str]
     log_file: Path
+    start_command: Optional[Tuple[str, ...]]
+    start_timeout: float
 
 
 def _resolve_log_path(filename: str) -> Path:
@@ -35,10 +37,23 @@ TIMEZONE = pytz.timezone(settings.APP_TIMEZONE)
 APP_LOG_FILE = _resolve_log_path(settings.APP_LOG_FILE)
 MQTT_LOG_FILE = _resolve_log_path(settings.MQTT_LOG_FILE)
 
+def _parse_start_command(value: Optional[str]) -> Optional[Tuple[str, ...]]:
+    """Parse the configured start command into a tuple of arguments."""
+
+    if not value:
+        return None
+
+    import shlex
+
+    return tuple(shlex.split(value))
+
+
 MQTT_SETTINGS = MQTTSettings(
     host=settings.MQTT_BROKER_HOST,
     port=settings.MQTT_BROKER_PORT,
     topic=settings.MQTT_TOPIC,
     devices=settings.MQTT_DEVICES,
     log_file=MQTT_LOG_FILE,
+    start_command=_parse_start_command(settings.MQTT_BROKER_START_COMMAND),
+    start_timeout=settings.MQTT_BROKER_START_TIMEOUT,
 )
