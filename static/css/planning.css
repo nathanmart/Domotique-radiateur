@@ -9,7 +9,6 @@
 html,
 body {
     height: 100%;
-    overflow: hidden;
 }
 
 body {
@@ -17,6 +16,7 @@ body {
     background: #f8f9fa;
     touch-action: manipulation;
     overscroll-behavior: none;
+    overflow-x: hidden;
 }
 
 .planning-container {
@@ -305,6 +305,17 @@ body {
     .day-actions {
         align-self: stretch;
         justify-content: flex-start;
+        width: 100%;
+    }
+
+    .copy-panel {
+        position: fixed;
+        inset: auto 1rem 1.25rem 1rem;
+        min-width: 0;
+        width: calc(100vw - 2rem);
+        max-height: min(70vh, 420px);
+        overflow-y: auto;
+        border-radius: 1rem;
     }
 
     .planning-panel {
