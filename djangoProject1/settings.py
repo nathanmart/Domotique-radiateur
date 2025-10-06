@@ -13,20 +13,30 @@ https://docs.djangoproject.com/en/5.0/ref/settings/
 from pathlib import Path
 import os
 
+from dotenv import load_dotenv
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+# Load environment variables
+load_dotenv(BASE_DIR / ".env")
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-b_+_l@=-a6*ho@7%14)rmw-7g41#j55z_exq-&49)+(!=do#dx'
+SECRET_KEY = os.getenv(
+    "DJANGO_SECRET_KEY",
+    "django-insecure-change-me",
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv("DJANGO_DEBUG", "false").lower() in {"1", "true", "yes"}
 
-ALLOWED_HOSTS = ["*"]
+allowed_hosts = os.getenv("DJANGO_ALLOWED_HOSTS", "*")
+ALLOWED_HOSTS = [host.strip() for host in allowed_hosts.split(",") if host.strip()]
 
 
 # Application definition
@@ -120,6 +130,23 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 STATICFILES_DIRS = [os.path.join(BASE_DIR, 'static'),]
+
+
+# Application specific settings
+APP_TIMEZONE = os.getenv("APP_TIMEZONE", "Europe/Paris")
+MQTT_BROKER_HOST = os.getenv("MQTT_BROKER_HOST", "127.0.0.1")
+MQTT_BROKER_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
+MQTT_TOPIC = os.getenv("MQTT_TOPIC", "test")
+MQTT_DEVICES = [
+    device.strip()
+    for device in os.getenv("MQTT_DEVICES", "Cuisine,Chambre").split(",")
+    if device.strip()
+]
+
+LOG_DIRECTORY = Path(os.getenv("LOG_DIRECTORY") or (BASE_DIR / "logs"))
+LOG_DIRECTORY.mkdir(parents=True, exist_ok=True)
+APP_LOG_FILE = os.getenv("APP_LOG_FILE", "app.log")
+MQTT_LOG_FILE = os.getenv("MQTT_LOG_FILE", "mqtt.log")
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
 
