@@ -3,7 +3,10 @@
 <html lang="fr">
     <head>
         <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+        >
         <title>Contrôle radiateur - Planning</title>
         <link rel="stylesheet" href="{% static 'bootstrap-5.3.8-dist/css/bootstrap.min.css' %}">
         <link rel="stylesheet" href="{% static 'css/planning.css' %}">
@@ -20,7 +23,6 @@
                         <a class="btn btn-outline-secondary flex-fill" href="/">Retour au tableau de bord</a>
                     </div>
                 </div>
-                <div id="statusAlert" class="alert d-none" role="alert" aria-live="polite"></div>
             </div>
 
             <div class="planning-panel">
@@ -44,6 +46,8 @@
             </div>
         </div>
 
+        <div id="statusToast" class="status-toast" role="status" aria-live="polite"></div>
+
         <script src="{% static 'bootstrap-5.3.8-dist/js/bootstrap.bundle.min.js' %}"></script>
         <script>
             const DAYS = [
@@ -64,7 +68,7 @@
 
             const scheduleBoard = document.getElementById('dayTrack');
             const timelineHours = document.getElementById('timelineHours');
-            const statusAlert = document.getElementById('statusAlert');
+            const statusToast = document.getElementById('statusToast');
             const prevButton = document.getElementById('prevDay');
             const nextButton = document.getElementById('nextDay');
             const currentDayLabel = document.getElementById('currentDayLabel');
@@ -81,32 +85,27 @@
             let autoSaveTimeout = null;
 
             function showStatus(message, type = 'info', autoHide = true) {
-                statusAlert.textContent = message;
-                statusAlert.className = `alert alert-${type}`;
+                statusToast.textContent = message;
+                statusToast.className = `status-toast status-toast-${type} status-toast-visible`;
                 if (autoHide) {
                     if (statusTimeout) {
                         clearTimeout(statusTimeout);
                     }
                     statusTimeout = setTimeout(() => {
-                        statusAlert.classList.add('d-none');
+                        hideStatus();
                     }, 3500);
-                } else {
-                    if (statusTimeout) {
-                        clearTimeout(statusTimeout);
-                        statusTimeout = null;
-                    }
+                } else if (statusTimeout) {
+                    clearTimeout(statusTimeout);
+                    statusTimeout = null;
                 }
-                statusAlert.classList.remove('d-none');
-                scheduleTimelineRefresh();
             }
 
             function hideStatus() {
-                statusAlert.classList.add('d-none');
                 if (statusTimeout) {
                     clearTimeout(statusTimeout);
                     statusTimeout = null;
                 }
-                scheduleTimelineRefresh();
+                statusToast.classList.remove('status-toast-visible');
             }
 
             function getCookie(name) {
@@ -685,9 +684,6 @@
                     scheduleTimelineRefresh();
                 });
                 panelObserver.observe(planningPanel);
-                if (statusAlert) {
-                    panelObserver.observe(statusAlert);
-                }
             }
         </script>
     </body>
