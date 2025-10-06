@@ -74,6 +74,15 @@ body {
     flex: 1;
     display: flex;
     flex-direction: column;
+    position: relative;
+}
+
+.day-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.25rem;
+    flex-wrap: wrap;
 }
 
 .day-switcher {
@@ -81,6 +90,67 @@ body {
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
+}
+
+.day-actions {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.day-actions > .btn {
+    white-space: nowrap;
+}
+
+.copy-panel {
+    position: absolute;
+    top: calc(100% + 0.5rem);
+    right: 0;
+    background: #fff;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    border-radius: 0.9rem;
+    padding: 1rem;
+    min-width: min(260px, 90vw);
+    box-shadow: 0 18px 40px rgba(15, 23, 42, 0.16);
+    z-index: 1010;
+}
+
+.copy-panel-visible {
+    display: block;
+}
+
+.copy-panel-header {
+    font-weight: 600;
+    margin-bottom: 0.35rem;
+}
+
+.copy-panel-help {
+    font-size: 0.85rem;
+    color: #6c757d;
+    margin-bottom: 0.75rem;
+}
+
+.copy-panel-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-height: 220px;
+    overflow-y: auto;
+    margin-bottom: 0.75rem;
+}
+
+.copy-option .form-check-label {
+    cursor: pointer;
+}
+
+.copy-panel-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+}
+
+.copy-panel-actions .btn {
+    min-width: 90px;
 }
 
 .day-switcher-btn {
@@ -226,6 +296,17 @@ body {
 }
 
 @media (max-width: 576px) {
+    .day-header {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 1rem;
+    }
+
+    .day-actions {
+        align-self: stretch;
+        justify-content: flex-start;
+    }
+
     .planning-panel {
         padding: 1.25rem 1rem 1.5rem;
         border-radius: 1rem;

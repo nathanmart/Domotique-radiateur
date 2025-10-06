@@ -26,16 +26,47 @@
             </div>
 
             <div class="planning-panel">
-                <div class="day-switcher">
-                    <button class="btn btn-outline-secondary day-switcher-btn" type="button" id="prevDay" aria-label="Jour précédent">
-                        <span aria-hidden="true">&larr;</span>
-                    </button>
-                    <div class="day-switcher-label text-center">
-                        <div class="fw-semibold" id="currentDayLabel">Lundi</div>
+                <div class="day-header">
+                    <div class="day-switcher">
+                        <button class="btn btn-outline-secondary day-switcher-btn" type="button" id="prevDay" aria-label="Jour précédent">
+                            <span aria-hidden="true">&larr;</span>
+                        </button>
+                        <div class="day-switcher-label text-center">
+                            <div class="fw-semibold" id="currentDayLabel">Lundi</div>
+                        </div>
+                        <button class="btn btn-outline-secondary day-switcher-btn" type="button" id="nextDay" aria-label="Jour suivant">
+                            <span aria-hidden="true">&rarr;</span>
+                        </button>
                     </div>
-                    <button class="btn btn-outline-secondary day-switcher-btn" type="button" id="nextDay" aria-label="Jour suivant">
-                        <span aria-hidden="true">&rarr;</span>
-                    </button>
+                    <div class="day-actions">
+                        <button
+                            class="btn btn-primary"
+                            type="button"
+                            id="copyDayButton"
+                            aria-haspopup="dialog"
+                            aria-expanded="false"
+                        >
+                            Copier vers…
+                        </button>
+                        <div
+                            class="copy-panel"
+                            id="copyPanel"
+                            role="dialog"
+                            aria-modal="true"
+                            aria-labelledby="copyPanelTitle"
+                            hidden
+                        >
+                            <div class="copy-panel-header" id="copyPanelTitle">Copier ce jour vers :</div>
+                            <p class="copy-panel-help">Sélectionnez les jours à mettre à jour. Leur programmation existante sera remplacée.</p>
+                            <form id="copyPanelForm" class="copy-panel-form">
+                                <div class="copy-panel-list" id="copyDayList"></div>
+                                <div class="copy-panel-actions">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="copyCancelButton">Annuler</button>
+                                    <button type="submit" class="btn btn-sm btn-primary">Copier</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="timeline-wrapper">
@@ -74,6 +105,12 @@
             const currentDayLabel = document.getElementById('currentDayLabel');
             const timelineWrapper = document.querySelector('.timeline-wrapper');
             const planningPanel = document.querySelector('.planning-panel');
+            const copyButton = document.getElementById('copyDayButton');
+            const copyPanel = document.getElementById('copyPanel');
+            const copyPanelForm = document.getElementById('copyPanelForm');
+            const copyPanelList = document.getElementById('copyDayList');
+            const copyPanelTitle = document.getElementById('copyPanelTitle');
+            const copyCancelButton = document.getElementById('copyCancelButton');
 
             let statusTimeout = null;
             let currentDayIndex = 0;
@@ -83,6 +120,7 @@
             let pixelsPerMinute = 1;
             let pendingTimelineRefresh = false;
             let autoSaveTimeout = null;
+            let copyPanelVisible = false;
 
             function showStatus(message, type = 'info', autoHide = true) {
                 statusToast.textContent = message;
@@ -226,6 +264,116 @@
                 scheduleBoard.dataset.day = DAYS[currentDayIndex].key;
                 prevButton.disabled = currentDayIndex === 0;
                 nextButton.disabled = currentDayIndex === DAYS.length - 1;
+                updateCopyPanelContent();
+            }
+
+            function updateCopyPanelContent() {
+                if (!copyPanelTitle || !copyButton) {
+                    return;
+                }
+                copyButton.setAttribute(
+                    'aria-label',
+                    `Copier la programmation du ${DAYS[currentDayIndex].label} vers d'autres jours`,
+                );
+                copyPanelTitle.textContent = `Copier ${DAYS[currentDayIndex].label} vers :`;
+                if (!copyPanelList) {
+                    return;
+                }
+                if (!copyPanelVisible) {
+                    copyPanelList.innerHTML = '';
+                } else {
+                    populateCopyPanelList();
+                }
+            }
+
+            function populateCopyPanelList() {
+                if (!copyPanelList) {
+                    return;
+                }
+                copyPanelList.innerHTML = '';
+                DAYS.forEach((day, index) => {
+                    if (index === currentDayIndex) {
+                        return;
+                    }
+                    const checkboxId = `copy-${day.key}`;
+                    const wrapper = document.createElement('div');
+                    wrapper.className = 'form-check copy-option';
+
+                    const input = document.createElement('input');
+                    input.className = 'form-check-input';
+                    input.type = 'checkbox';
+                    input.name = 'copyDay';
+                    input.value = day.key;
+                    input.id = checkboxId;
+
+                    const label = document.createElement('label');
+                    label.className = 'form-check-label';
+                    label.setAttribute('for', checkboxId);
+                    label.textContent = day.label;
+
+                    wrapper.appendChild(input);
+                    wrapper.appendChild(label);
+                    copyPanelList.appendChild(wrapper);
+                });
+            }
+
+            let copyOutsideHandler = null;
+            let copyEscapeHandler = null;
+
+            function closeCopyPanel() {
+                if (!copyPanel || !copyButton) {
+                    return;
+                }
+                copyPanelVisible = false;
+                copyPanel.setAttribute('hidden', '');
+                copyPanel.classList.remove('copy-panel-visible');
+                copyButton.setAttribute('aria-expanded', 'false');
+                if (copyOutsideHandler) {
+                    document.removeEventListener('pointerdown', copyOutsideHandler, true);
+                    copyOutsideHandler = null;
+                }
+                if (copyEscapeHandler) {
+                    document.removeEventListener('keydown', copyEscapeHandler, true);
+                    copyEscapeHandler = null;
+                }
+            }
+
+            function openCopyPanel() {
+                if (!copyPanel || !copyButton) {
+                    return;
+                }
+                populateCopyPanelList();
+                copyPanelVisible = true;
+                copyPanel.removeAttribute('hidden');
+                copyPanel.classList.add('copy-panel-visible');
+                copyButton.setAttribute('aria-expanded', 'true');
+                copyOutsideHandler = (event) => {
+                    if (!copyPanelVisible) {
+                        return;
+                    }
+                    if (
+                        copyPanel.contains(event.target)
+                        || copyButton.contains(event.target)
+                    ) {
+                        return;
+                    }
+                    closeCopyPanel();
+                };
+                copyEscapeHandler = (event) => {
+                    if (event.key === 'Escape') {
+                        closeCopyPanel();
+                    }
+                };
+                document.addEventListener('pointerdown', copyOutsideHandler, true);
+                document.addEventListener('keydown', copyEscapeHandler, true);
+            }
+
+            function toggleCopyPanel() {
+                if (copyPanelVisible) {
+                    closeCopyPanel();
+                } else {
+                    openCopyPanel();
+                }
             }
 
             function updateSlotElement(block, startMinutes, endMinutes) {
@@ -668,6 +816,44 @@
                     renderCurrentDay();
                 }
             });
+
+            if (copyButton && copyPanel && copyPanelForm && copyCancelButton) {
+                copyButton.addEventListener('click', () => {
+                    toggleCopyPanel();
+                });
+
+                copyCancelButton.addEventListener('click', () => {
+                    closeCopyPanel();
+                });
+
+                copyPanelForm.addEventListener('submit', (event) => {
+                    event.preventDefault();
+                    const sourceDayKey = DAYS[currentDayIndex].key;
+                    const targets = Array.from(
+                        copyPanelForm.querySelectorAll('input[name="copyDay"]:checked'),
+                    ).map((input) => input.value);
+
+                    if (targets.length === 0) {
+                        showStatus('Sélectionnez au moins un jour pour copier la programmation.', 'warning');
+                        return;
+                    }
+
+                    const sourceSlots = currentSchedule[sourceDayKey] || [];
+                    targets.forEach((dayKey) => {
+                        currentSchedule[dayKey] = sourceSlots.map((slot) => ({
+                            start: slot.start,
+                            end: slot.end,
+                        }));
+                    });
+
+                    if (targets.includes(sourceDayKey)) {
+                        renderCurrentDay();
+                    }
+
+                    closeCopyPanel();
+                    persistSchedule('Programmations copiées et enregistrées.', 'Copie en cours…');
+                });
+            }
 
             const rawSchedule = JSON.parse(document.getElementById('schedule-data').textContent || '{}');
             let currentSchedule = ensureScheduleStructure(rawSchedule);
