@@ -1,33 +1,45 @@
-/*Boutons choix de page*/
-.mbsc-button-group-justified button {
-    height: 10vh; /* 30% de la hauteur de la fenêtre de visualisation */
-    font-size: 30px;
+.main-panel {
+    max-width: 420px;
+    margin: 0 auto;
+    min-height: 100vh;
 }
 
-/*Bouton choix de mode*/
-div[mbsc-segmented-group] label {
-    height: 10vh;
-    font-size: 5vh;
+.btn-icon {
+    padding: 0.4rem 0.65rem;
+    font-size: 0.8rem;
 }
 
-
-/*Image des états*/
-.mbsc-grid .mbsc-col img {
-    width: 40vw;  /* ou une autre valeur ou pourcentage */
-    height: auto;  /* conserve les proportions de l'image */
-    font-size: 300px;
-}
-/*Texte des états*/
-.mbsc-col{
-    font-size: 6vw;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+.mode-section,
+.status-section {
+    border: none;
+    border-radius: 0.75rem;
+    box-shadow: 0 4px 18px rgba(31, 41, 55, 0.08);
 }
 
-h1 {
-    font-size: 6vw;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+.btn-mode {
+    padding: 0.75rem 0.5rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    border: 1px solid #ced4da;
+}
+
+.btn-mode:hover,
+.btn-check:checked + .btn-mode {
+    background-color: #0d6efd;
+    color: #fff;
+    border-color: #0d6efd;
+}
+
+.status-row + .status-row {
+    margin-top: 0.75rem;
+}
+
+.status-row {
+    font-size: 0.95rem;
+}
+
+.status-icon {
+    width: 42px;
+    height: 42px;
+    object-fit: contain;
 }
