@@ -10,49 +10,47 @@
     </head>
     <body class="bg-light">
         <script id="schedule-data" type="application/json">{{ data|safe }}</script>
-        <div class="container py-4">
-            <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3 mb-4">
-                <div>
-                    <h1 class="h3 mb-1">Planning hebdomadaire</h1>
-                    <p class="text-muted mb-0">Ajoutez des périodes d'activation pour chaque jour de la semaine.</p>
+        <div class="container py-4 planning-container">
+            <div class="d-flex flex-column gap-3 gap-md-4 mb-4">
+                <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-md-between gap-3">
+                    <div>
+                        <h1 class="h3 mb-1">Planning hebdomadaire</h1>
+                        <p class="text-muted mb-0">Glissez et étirez les blocs pour définir les périodes d'activation.</p>
+                    </div>
+                    <div class="d-flex flex-column flex-sm-row gap-2 w-100 w-md-auto">
+                        <a class="btn btn-outline-secondary flex-fill" href="/">Retour au tableau de bord</a>
+                        <button class="btn btn-primary flex-fill" type="button" id="saveSchedule">Enregistrer le planning</button>
+                    </div>
                 </div>
-                <div class="d-flex gap-2">
-                    <a class="btn btn-outline-secondary" href="/">Retour au tableau de bord</a>
-                    <button class="btn btn-primary" type="button" id="saveSchedule">Enregistrer le planning</button>
-                </div>
+                <div id="statusAlert" class="alert d-none" role="alert" aria-live="polite"></div>
             </div>
-            <div id="statusAlert" class="alert d-none" role="alert"></div>
-            <div id="scheduleBoard" class="schedule-board"></div>
-            <p class="text-muted small mt-3 mb-0">
-                Double-cliquez sur une journée pour créer rapidement un créneau à l'endroit désiré.
-            </p>
-        </div>
 
-        <div class="modal fade" id="slotModal" tabindex="-1" aria-labelledby="slotModalLabel" aria-hidden="true">
-            <div class="modal-dialog">
-                <form class="modal-content" id="slotForm">
-                    <div class="modal-header">
-                        <h2 class="modal-title fs-5" id="slotModalLabel">Ajouter un créneau</h2>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+            <div class="planning-panel">
+                <div class="day-switcher">
+                    <button class="btn btn-outline-secondary day-switcher-btn" type="button" id="prevDay" aria-label="Jour précédent">
+                        <span aria-hidden="true">&larr;</span>
+                    </button>
+                    <div class="day-switcher-label text-center">
+                        <div class="fw-semibold" id="currentDayLabel">Lundi</div>
+                        <div class="text-muted small">Touchez un bloc pour le déplacer ou le redimensionner.</div>
                     </div>
-                    <div class="modal-body">
-                        <div class="mb-3">
-                            <label class="form-label" for="startTime">Heure de début</label>
-                            <input class="form-control" type="time" id="startTime" name="start" step="300" required>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label" for="endTime">Heure de fin</label>
-                            <input class="form-control" type="time" id="endTime" name="end" step="300" required>
-                        </div>
-                        <div id="slotError" class="text-danger small"></div>
-                        <input type="hidden" id="modalDay" name="day">
-                        <input type="hidden" id="slotIndex" name="index">
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Annuler</button>
-                        <button type="submit" class="btn btn-primary">Enregistrer</button>
-                    </div>
-                </form>
+                    <button class="btn btn-outline-secondary day-switcher-btn" type="button" id="nextDay" aria-label="Jour suivant">
+                        <span aria-hidden="true">&rarr;</span>
+                    </button>
+                </div>
+
+                <div class="timeline-wrapper">
+                    <div class="timeline-hours" id="timelineHours"></div>
+                    <div class="timeline-track" id="dayTrack" data-day="monday"></div>
+                </div>
+
+                <div class="mt-3 d-flex gap-2">
+                    <button class="btn btn-outline-primary flex-fill" type="button" id="addSlotButton">Ajouter un créneau</button>
+                    <button class="btn btn-outline-danger flex-fill" type="button" id="clearDayButton">Vider le jour</button>
+                </div>
+                <p class="text-muted small mt-3 mb-0">
+                    Astuce&nbsp;: maintenez le doigt sur une zone vide pour dessiner un nouveau créneau.
+                </p>
             </div>
         </div>
 
@@ -68,21 +66,27 @@
                 { key: 'sunday', label: 'Dimanche' },
             ];
 
-            const scheduleBoard = document.getElementById('scheduleBoard');
-            const statusAlert = document.getElementById('statusAlert');
-            const modalElement = document.getElementById('slotModal');
-            const slotModal = new bootstrap.Modal(modalElement);
-            const slotForm = document.getElementById('slotForm');
-            const startInput = document.getElementById('startTime');
-            const endInput = document.getElementById('endTime');
-            const dayInput = document.getElementById('modalDay');
-            const indexInput = document.getElementById('slotIndex');
-            const slotError = document.getElementById('slotError');
-            const saveButton = document.getElementById('saveSchedule');
-
-            const HOUR_HEIGHT = 48;
+            const MINUTES_IN_DAY = 24 * 60;
+            const SLOT_MIN_DURATION = 15;
+            const DEFAULT_SLOT_DURATION = 60;
+            const HOUR_HEIGHT = 64;
             const MINUTE_HEIGHT = HOUR_HEIGHT / 60;
+
+            const scheduleBoard = document.getElementById('dayTrack');
+            const timelineHours = document.getElementById('timelineHours');
+            const statusAlert = document.getElementById('statusAlert');
+            const saveButton = document.getElementById('saveSchedule');
+            const addButton = document.getElementById('addSlotButton');
+            const clearButton = document.getElementById('clearDayButton');
+            const prevButton = document.getElementById('prevDay');
+            const nextButton = document.getElementById('nextDay');
+            const currentDayLabel = document.getElementById('currentDayLabel');
+
             let statusTimeout = null;
+            let currentDayIndex = 0;
+            let activeInteraction = null;
+            const CREATE_HOLD_DELAY = 200;
+            const CREATE_MOVE_THRESHOLD = 8;
 
             function showStatus(message, type = 'info', autoHide = true) {
                 statusAlert.textContent = message;
@@ -115,7 +119,7 @@
                 let cookieValue = null;
                 if (document.cookie && document.cookie !== '') {
                     const cookies = document.cookie.split(';');
-                    for (let i = 0; i < cookies.length; i++) {
+                    for (let i = 0; i < cookies.length; i += 1) {
                         const cookie = cookies[i].trim();
                         if (cookie.startsWith(name + '=')) {
                             cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
@@ -145,20 +149,16 @@
             }
 
             function clampMinutes(minutes) {
-                return Math.max(0, Math.min(24 * 60, minutes));
+                return Math.max(0, Math.min(MINUTES_IN_DAY, minutes));
             }
 
-            function snapMinutes(minutes, step = 15) {
+            function snapMinutes(minutes, step = SLOT_MIN_DURATION) {
                 return Math.round(minutes / step) * step;
             }
 
             function minutesToTime(minutes) {
-                const hours = Math.floor(minutes / 60)
-                    .toString()
-                    .padStart(2, '0');
-                const mins = Math.floor(minutes % 60)
-                    .toString()
-                    .padStart(2, '0');
+                const hours = Math.floor(minutes / 60).toString().padStart(2, '0');
+                const mins = Math.floor(minutes % 60).toString().padStart(2, '0');
                 return `${hours}:${mins}`;
             }
 
@@ -167,87 +167,76 @@
                 return Number.parseInt(hours, 10) * 60 + Number.parseInt(minutes, 10);
             }
 
-            function buildLayout() {
-                scheduleBoard.innerHTML = '';
-                const hoursColumn = document.createElement('div');
-                hoursColumn.className = 'schedule-hours';
+            function pointerMinutes(event) {
+                const rect = scheduleBoard.getBoundingClientRect();
+                const offsetY = event.clientY - rect.top;
+                return clampMinutes(offsetY / MINUTE_HEIGHT);
+            }
+
+            function sortSlots(slots) {
+                return [...slots].sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
+            }
+
+            function renderHours() {
+                timelineHours.innerHTML = '';
                 for (let hour = 0; hour < 24; hour += 1) {
                     const hourRow = document.createElement('div');
-                    hourRow.className = 'schedule-hour';
+                    hourRow.className = 'timeline-hour';
                     hourRow.textContent = `${hour.toString().padStart(2, '0')}:00`;
-                    hoursColumn.appendChild(hourRow);
+                    timelineHours.appendChild(hourRow);
                 }
-
-                const daysWrapper = document.createElement('div');
-                daysWrapper.className = 'schedule-days';
-
-                DAYS.forEach(({ key, label }) => {
-                    const column = document.createElement('div');
-                    column.className = 'schedule-day';
-                    column.innerHTML = `
-                        <div class="schedule-day-header">
-                            <span class="fw-semibold">${label}</span>
-                            <button type="button" class="btn btn-sm btn-outline-primary" data-action="add-slot" data-day="${key}">
-                                Ajouter
-                            </button>
-                        </div>
-                        <div class="schedule-day-body" data-day="${key}" data-role="slot-track"></div>
-                    `;
-                    daysWrapper.appendChild(column);
-                });
-
-                scheduleBoard.appendChild(hoursColumn);
-                scheduleBoard.appendChild(daysWrapper);
+                const endMarker = document.createElement('div');
+                endMarker.className = 'timeline-hour timeline-hour-end';
+                endMarker.textContent = '24:00';
+                timelineHours.appendChild(endMarker);
             }
 
-            function renderDay(dayKey) {
-                const dayTrack = scheduleBoard.querySelector(`.schedule-day-body[data-day="${dayKey}"]`);
-                if (!dayTrack) {
-                    return;
+            function updateDayNavigation() {
+                currentDayLabel.textContent = DAYS[currentDayIndex].label;
+                scheduleBoard.dataset.day = DAYS[currentDayIndex].key;
+                prevButton.disabled = currentDayIndex === 0;
+                nextButton.disabled = currentDayIndex === DAYS.length - 1;
+            }
+
+            function updateSlotElement(block, startMinutes, endMinutes) {
+                const top = minutesToPixels(startMinutes);
+                const height = Math.max(minutesToPixels(endMinutes - startMinutes), minutesToPixels(SLOT_MIN_DURATION));
+                block.style.top = `${top}px`;
+                block.style.height = `${height}px`;
+                const timeLabel = block.querySelector('.slot-time');
+                if (timeLabel) {
+                    timeLabel.textContent = `${minutesToTime(startMinutes)} – ${minutesToTime(endMinutes)}`;
                 }
+            }
+
+            function renderCurrentDay() {
+                const dayKey = DAYS[currentDayIndex].key;
                 const slots = currentSchedule[dayKey] || [];
-                dayTrack.innerHTML = '';
+                const sortedSlots = sortSlots(slots);
+                currentSchedule[dayKey] = sortedSlots;
+                scheduleBoard.innerHTML = '';
 
-                slots.forEach((slot, index) => {
-                    const block = document.createElement('div');
-                    block.className = 'schedule-slot';
-                    block.dataset.day = dayKey;
-                    block.dataset.index = index;
-
+                sortedSlots.forEach((slot, index) => {
                     const startMinutes = timeToMinutes(slot.start);
                     const endMinutes = timeToMinutes(slot.end);
-                    block.style.top = `${minutesToPixels(startMinutes)}px`;
-                    block.style.height = `${minutesToPixels(endMinutes - startMinutes)}px`;
 
+                    const block = document.createElement('div');
+                    block.className = 'slot';
+                    block.dataset.index = String(index);
                     block.innerHTML = `
-                        <div class="schedule-slot-time">${slot.start} – ${slot.end}</div>
-                        <div class="schedule-slot-actions">
-                            <button type="button" class="btn btn-sm btn-light" data-action="edit-slot" data-day="${dayKey}" data-index="${index}">Modifier</button>
-                            <button type="button" class="btn btn-sm btn-danger" data-action="delete-slot" data-day="${dayKey}" data-index="${index}">Supprimer</button>
+                        <div class="slot-handle slot-handle-start" data-handle="start"></div>
+                        <div class="slot-content">
+                            <div class="slot-time">${slot.start} – ${slot.end}</div>
+                            <button class="btn btn-sm btn-light slot-delete" type="button" data-action="delete" aria-label="Supprimer le créneau">
+                                &times;
+                            </button>
                         </div>
+                        <div class="slot-handle slot-handle-end" data-handle="end"></div>
                     `;
 
-                    dayTrack.appendChild(block);
+                    updateSlotElement(block, startMinutes, endMinutes);
+                    scheduleBoard.appendChild(block);
                 });
-            }
-
-            function renderSchedule() {
-                DAYS.forEach(({ key }) => renderDay(key));
-            }
-
-            function sortAndValidate(slots) {
-                const sorted = [...slots].sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
-                for (let i = 0; i < sorted.length; i += 1) {
-                    const start = sorted[i].start;
-                    const end = sorted[i].end;
-                    if (start >= end) {
-                        return null;
-                    }
-                    if (i > 0 && start < sorted[i - 1].end) {
-                        return null;
-                    }
-                }
-                return sorted;
             }
 
             function persistSchedule(successMessage = 'Planning enregistré.') {
@@ -271,124 +260,414 @@
                     });
             }
 
-            function handleAddOrEdit(dayKey, index = null, defaultStart = '', defaultEnd = '') {
-                slotError.textContent = '';
-                dayInput.value = dayKey;
-                indexInput.value = index !== null ? String(index) : '';
-                const titleElement = modalElement.querySelector('.modal-title');
-                if (index !== null) {
-                    const slot = currentSchedule[dayKey][index];
-                    startInput.value = slot.start;
-                    endInput.value = slot.end;
-                    if (titleElement) {
-                        titleElement.textContent = 'Modifier le créneau';
+            function canPlaceSlot(dayKey, startMinutes, endMinutes, excludeIndex = null) {
+                if (endMinutes - startMinutes < SLOT_MIN_DURATION) {
+                    return false;
+                }
+                const slots = currentSchedule[dayKey] || [];
+                for (let i = 0; i < slots.length; i += 1) {
+                    if (excludeIndex !== null && i === excludeIndex) {
+                        continue;
                     }
-                } else {
-                    startInput.value = defaultStart;
-                    endInput.value = defaultEnd;
-                    if (titleElement) {
-                        titleElement.textContent = 'Ajouter un créneau';
+                    const existing = slots[i];
+                    const existingStart = timeToMinutes(existing.start);
+                    const existingEnd = timeToMinutes(existing.end);
+                    if (Math.max(existingStart, startMinutes) < Math.min(existingEnd, endMinutes)) {
+                        return false;
                     }
                 }
-                slotModal.show();
+                return true;
             }
 
-            function removeSlot(dayKey, index) {
+            function findAvailableStart(dayKey, durationMinutes) {
+                const slots = sortSlots(currentSchedule[dayKey] || []);
+                let previousEnd = 0;
+                for (let i = 0; i < slots.length; i += 1) {
+                    const start = timeToMinutes(slots[i].start);
+                    if (start - previousEnd >= durationMinutes) {
+                        return previousEnd;
+                    }
+                    previousEnd = timeToMinutes(slots[i].end);
+                }
+                if (MINUTES_IN_DAY - previousEnd >= durationMinutes) {
+                    return previousEnd;
+                }
+                return null;
+            }
+
+            function addSlot(dayKey, startMinutes, endMinutes) {
+                const slots = currentSchedule[dayKey] || [];
+                slots.push({ start: minutesToTime(startMinutes), end: minutesToTime(endMinutes) });
+                currentSchedule[dayKey] = sortSlots(slots);
+                renderCurrentDay();
+            }
+
+            function deleteSlot(dayKey, index) {
                 const slots = currentSchedule[dayKey] || [];
                 if (index < 0 || index >= slots.length) {
                     return;
                 }
-                const confirmation = window.confirm('Supprimer ce créneau ?');
-                if (!confirmation) {
-                    return;
-                }
                 slots.splice(index, 1);
-                currentSchedule[dayKey] = sortAndValidate(slots) || [];
-                renderDay(dayKey);
-                persistSchedule('Créneau supprimé.');
+                currentSchedule[dayKey] = slots;
+                renderCurrentDay();
             }
 
-            slotForm.addEventListener('submit', (event) => {
+            function beginMove(event, dayKey, index, block) {
+                const slots = currentSchedule[dayKey];
+                const slot = slots[index];
+                const startMinutes = timeToMinutes(slot.start);
+                const endMinutes = timeToMinutes(slot.end);
+                const duration = endMinutes - startMinutes;
+                const pointerStart = pointerMinutes(event);
+                const offset = pointerStart - startMinutes;
+
+                const previousEnd = index > 0 ? timeToMinutes(slots[index - 1].end) : 0;
+                const nextStart = index < slots.length - 1 ? timeToMinutes(slots[index + 1].start) : MINUTES_IN_DAY;
+
+                activeInteraction = {
+                    type: 'move',
+                    pointerId: event.pointerId,
+                    dayKey,
+                    index,
+                    element: block,
+                    captureTarget: block,
+                    duration,
+                    offset,
+                    minStart: previousEnd,
+                    maxStart: nextStart - duration,
+                    currentStart: startMinutes,
+                    currentEnd: endMinutes,
+                    originalStart: startMinutes,
+                    originalEnd: endMinutes,
+                };
+                block.setPointerCapture(event.pointerId);
                 event.preventDefault();
-                const dayKey = dayInput.value;
-                const start = startInput.value;
-                const end = endInput.value;
-                const index = indexInput.value !== '' ? Number.parseInt(indexInput.value, 10) : null;
+            }
 
-                if (!dayKey || !start || !end) {
-                    slotError.textContent = 'Veuillez renseigner toutes les informations.';
+            function beginResize(event, dayKey, index, block, handle) {
+                const slots = currentSchedule[dayKey];
+                const slot = slots[index];
+                const startMinutes = timeToMinutes(slot.start);
+                const endMinutes = timeToMinutes(slot.end);
+
+                const previousEnd = index > 0 ? timeToMinutes(slots[index - 1].end) : 0;
+                const nextStart = index < slots.length - 1 ? timeToMinutes(slots[index + 1].start) : MINUTES_IN_DAY;
+
+                activeInteraction = {
+                    type: handle === 'start' ? 'resize-start' : 'resize-end',
+                    pointerId: event.pointerId,
+                    dayKey,
+                    index,
+                    element: block,
+                    captureTarget: block,
+                    currentStart: startMinutes,
+                    currentEnd: endMinutes,
+                    originalStart: startMinutes,
+                    originalEnd: endMinutes,
+                    minStart: previousEnd,
+                    maxEnd: nextStart,
+                };
+                block.setPointerCapture(event.pointerId);
+                event.preventDefault();
+            }
+
+            function createTemporarySlotElement() {
+                const block = document.createElement('div');
+                block.className = 'slot slot-temporary';
+                block.innerHTML = `
+                    <div class="slot-handle slot-handle-start" data-handle="start"></div>
+                    <div class="slot-content">
+                        <div class="slot-time">--:-- – --:--</div>
+                    </div>
+                    <div class="slot-handle slot-handle-end" data-handle="end"></div>
+                `;
+                return block;
+            }
+
+            function beginCreateHold(event, dayKey) {
+                const pointerId = event.pointerId;
+                const anchorMinutes = snapMinutes(pointerMinutes(event));
+                const holdTimeout = window.setTimeout(() => {
+                    if (!activeInteraction || activeInteraction.type !== 'pending-create' || activeInteraction.pointerId !== pointerId) {
+                        return;
+                    }
+                    const block = createTemporarySlotElement();
+                    scheduleBoard.appendChild(block);
+                    const start = activeInteraction.anchor;
+                    const end = clampMinutes(start + SLOT_MIN_DURATION);
+                    activeInteraction.type = 'create';
+                    activeInteraction.element = block;
+                    activeInteraction.captureTarget = scheduleBoard;
+                    activeInteraction.currentStart = start;
+                    activeInteraction.currentEnd = end;
+                    updateSlotElement(block, start, end);
+                    try {
+                        scheduleBoard.setPointerCapture(pointerId);
+                    } catch (error) {
+                        /* Ignore */
+                    }
+                }, CREATE_HOLD_DELAY);
+
+                activeInteraction = {
+                    type: 'pending-create',
+                    pointerId,
+                    dayKey,
+                    anchor: anchorMinutes,
+                    holdTimeout,
+                    startClientY: event.clientY,
+                    captureTarget: null,
+                };
+            }
+
+            function updateMove(event) {
+                const pointer = clampMinutes(pointerMinutes(event) - activeInteraction.offset);
+                const snapped = snapMinutes(pointer);
+                const start = clampMinutes(Math.min(Math.max(snapped, activeInteraction.minStart), activeInteraction.maxStart));
+                const end = clampMinutes(start + activeInteraction.duration);
+                activeInteraction.currentStart = start;
+                activeInteraction.currentEnd = end;
+                updateSlotElement(activeInteraction.element, start, end);
+                event.preventDefault();
+            }
+
+            function updateResizeStart(event) {
+                const pointer = snapMinutes(clampMinutes(pointerMinutes(event)));
+                const maxStart = activeInteraction.currentEnd - SLOT_MIN_DURATION;
+                const start = Math.min(Math.max(pointer, activeInteraction.minStart), maxStart);
+                activeInteraction.currentStart = start;
+                updateSlotElement(activeInteraction.element, start, activeInteraction.currentEnd);
+                event.preventDefault();
+            }
+
+            function updateResizeEnd(event) {
+                const pointer = snapMinutes(clampMinutes(pointerMinutes(event)));
+                const minEnd = activeInteraction.currentStart + SLOT_MIN_DURATION;
+                const end = Math.max(Math.min(pointer, activeInteraction.maxEnd), minEnd);
+                activeInteraction.currentEnd = end;
+                updateSlotElement(activeInteraction.element, activeInteraction.currentStart, end);
+                event.preventDefault();
+            }
+
+            function updateCreate(event) {
+                const pointer = snapMinutes(clampMinutes(pointerMinutes(event)));
+                let start = Math.min(activeInteraction.anchor, pointer);
+                let end = Math.max(activeInteraction.anchor, pointer);
+                if (end - start < SLOT_MIN_DURATION) {
+                    end = start + SLOT_MIN_DURATION;
+                }
+                start = clampMinutes(start);
+                end = clampMinutes(end);
+                activeInteraction.currentStart = start;
+                activeInteraction.currentEnd = end;
+                updateSlotElement(activeInteraction.element, start, end);
+                event.preventDefault();
+            }
+
+            function commitMove() {
+                const { dayKey, index, currentStart, currentEnd } = activeInteraction;
+                currentSchedule[dayKey][index] = {
+                    start: minutesToTime(currentStart),
+                    end: minutesToTime(currentEnd),
+                };
+                renderCurrentDay();
+            }
+
+            function commitResize() {
+                const { dayKey, index, currentStart, currentEnd } = activeInteraction;
+                currentSchedule[dayKey][index] = {
+                    start: minutesToTime(currentStart),
+                    end: minutesToTime(currentEnd),
+                };
+                renderCurrentDay();
+            }
+
+            function commitCreate() {
+                const { dayKey, currentStart, currentEnd } = activeInteraction;
+                if (!canPlaceSlot(dayKey, currentStart, currentEnd)) {
+                    scheduleBoard.removeChild(activeInteraction.element);
+                    showStatus('Créneau impossible à ajouter à cet endroit (chevauchement).', 'warning');
+                    return;
+                }
+                addSlot(dayKey, currentStart, currentEnd);
+            }
+
+            function cancelActiveInteraction() {
+                if (activeInteraction) {
+                    if (activeInteraction.holdTimeout) {
+                        window.clearTimeout(activeInteraction.holdTimeout);
+                    }
+                    if (activeInteraction.type === 'create' && activeInteraction.element && activeInteraction.element.parentNode) {
+                        activeInteraction.element.parentNode.removeChild(activeInteraction.element);
+                    }
+                    if (activeInteraction.captureTarget && activeInteraction.pointerId !== undefined) {
+                        try {
+                            activeInteraction.captureTarget.releasePointerCapture(activeInteraction.pointerId);
+                        } catch (error) {
+                            /* Ignore */
+                        }
+                    }
+                }
+                activeInteraction = null;
+            }
+
+            scheduleBoard.addEventListener('pointerdown', (event) => {
+                if (activeInteraction) {
+                    return;
+                }
+                const dayKey = DAYS[currentDayIndex].key;
+                const deleteButton = event.target.closest('button[data-action="delete"]');
+                if (deleteButton) {
+                    const block = deleteButton.closest('.slot');
+                    if (!block) {
+                        return;
+                    }
+                    const index = Number.parseInt(block.dataset.index, 10);
+                    deleteSlot(dayKey, index);
                     return;
                 }
 
-                const slots = [...(currentSchedule[dayKey] || [])];
-
-                if (index !== null) {
-                    slots[index] = { start, end };
-                } else {
-                    slots.push({ start, end });
-                }
-
-                const normalized = sortAndValidate(slots);
-                if (!normalized) {
-                    slotError.textContent = 'Les créneaux ne doivent pas se chevaucher et la fin doit être postérieure au début.';
+                const handle = event.target.closest('[data-handle]');
+                const block = event.target.closest('.slot');
+                if (handle && block && !block.classList.contains('slot-temporary')) {
+                    const index = Number.parseInt(block.dataset.index, 10);
+                    beginResize(event, dayKey, index, block, handle.dataset.handle);
                     return;
                 }
 
-                currentSchedule[dayKey] = normalized;
-                slotModal.hide();
-                renderDay(dayKey);
-                persistSchedule(index !== null ? 'Créneau modifié.' : 'Créneau ajouté.');
+                if (block && !block.classList.contains('slot-temporary')) {
+                    const index = Number.parseInt(block.dataset.index, 10);
+                    beginMove(event, dayKey, index, block);
+                    return;
+                }
+
+                if (event.target === scheduleBoard) {
+                    beginCreateHold(event, dayKey);
+                }
             });
 
-            scheduleBoard.addEventListener('click', (event) => {
-                const actionButton = event.target.closest('button[data-action]');
-                if (!actionButton) {
+            scheduleBoard.addEventListener('pointermove', (event) => {
+                if (!activeInteraction || event.pointerId !== activeInteraction.pointerId) {
                     return;
                 }
-                const { action, day, index } = actionButton.dataset;
-                if (!day) {
+                if (activeInteraction.type === 'pending-create') {
+                    if (Math.abs(event.clientY - activeInteraction.startClientY) > CREATE_MOVE_THRESHOLD) {
+                        cancelActiveInteraction();
+                        return;
+                    }
+                    activeInteraction.anchor = snapMinutes(pointerMinutes(event));
                     return;
                 }
-                if (action === 'add-slot') {
-                    handleAddOrEdit(day);
-                } else if (action === 'edit-slot') {
-                    handleAddOrEdit(day, Number.parseInt(index, 10));
-                } else if (action === 'delete-slot') {
-                    removeSlot(day, Number.parseInt(index, 10));
+                if (activeInteraction.type === 'move') {
+                    updateMove(event);
+                } else if (activeInteraction.type === 'resize-start') {
+                    updateResizeStart(event);
+                } else if (activeInteraction.type === 'resize-end') {
+                    updateResizeEnd(event);
+                } else if (activeInteraction.type === 'create') {
+                    updateCreate(event);
                 }
+            });
+
+            scheduleBoard.addEventListener('pointerup', (event) => {
+                if (!activeInteraction || event.pointerId !== activeInteraction.pointerId) {
+                    return;
+                }
+                if (activeInteraction.type === 'pending-create') {
+                    cancelActiveInteraction();
+                    return;
+                }
+                if (activeInteraction.type === 'move') {
+                    commitMove();
+                } else if (activeInteraction.type === 'resize-start' || activeInteraction.type === 'resize-end') {
+                    commitResize();
+                } else if (activeInteraction.type === 'create') {
+                    if (activeInteraction.currentEnd - activeInteraction.currentStart < SLOT_MIN_DURATION) {
+                        if (activeInteraction.element.parentNode) {
+                            activeInteraction.element.parentNode.removeChild(activeInteraction.element);
+                        }
+                    } else {
+                        commitCreate();
+                    }
+                }
+                cancelActiveInteraction();
+            });
+
+            scheduleBoard.addEventListener('pointercancel', () => {
+                if (!activeInteraction) {
+                    return;
+                }
+                if (activeInteraction.type === 'pending-create') {
+                    cancelActiveInteraction();
+                    return;
+                }
+                if (activeInteraction.type === 'create' && activeInteraction.element.parentNode) {
+                    activeInteraction.element.parentNode.removeChild(activeInteraction.element);
+                } else if (activeInteraction.type !== 'create' && activeInteraction.element) {
+                    updateSlotElement(
+                        activeInteraction.element,
+                        activeInteraction.originalStart,
+                        activeInteraction.originalEnd,
+                    );
+                }
+                cancelActiveInteraction();
             });
 
             saveButton.addEventListener('click', () => {
                 persistSchedule();
             });
 
-            scheduleBoard.addEventListener('dblclick', (event) => {
-                const track = event.target.closest('[data-role="slot-track"]');
-                if (!track) {
+            addButton.addEventListener('click', () => {
+                const dayKey = DAYS[currentDayIndex].key;
+                const availableStart = findAvailableStart(dayKey, DEFAULT_SLOT_DURATION);
+                if (availableStart === null) {
+                    showStatus('Aucun créneau disponible. Supprimez ou réduisez un bloc existant.', 'warning');
                     return;
                 }
-                const { day } = track.dataset;
-                const rect = track.getBoundingClientRect();
-                const offsetMinutes = clampMinutes((event.clientY - rect.top) / MINUTE_HEIGHT);
-                const baseStart = clampMinutes(snapMinutes(offsetMinutes));
-                const startMinutes = Math.min(baseStart, 24 * 60 - 15);
-                let endMinutes = clampMinutes(startMinutes + 60);
-                if (endMinutes <= startMinutes) {
-                    endMinutes = clampMinutes(startMinutes + 15);
+                const start = snapMinutes(availableStart);
+                let end = start + DEFAULT_SLOT_DURATION;
+                if (end > MINUTES_IN_DAY) {
+                    end = MINUTES_IN_DAY;
                 }
-                handleAddOrEdit(day, null, minutesToTime(startMinutes), minutesToTime(endMinutes));
+                addSlot(dayKey, start, end);
+                showStatus('Nouveau créneau ajouté. Ajustez-le avec un glisser-déposer.', 'info');
             });
 
-            modalElement.addEventListener('hidden.bs.modal', () => {
-                slotForm.reset();
-                slotError.textContent = '';
+            clearButton.addEventListener('click', () => {
+                const dayKey = DAYS[currentDayIndex].key;
+                if (!currentSchedule[dayKey] || currentSchedule[dayKey].length === 0) {
+                    return;
+                }
+                const confirmation = window.confirm('Supprimer tous les créneaux de ce jour ?');
+                if (!confirmation) {
+                    return;
+                }
+                currentSchedule[dayKey] = [];
+                renderCurrentDay();
+                showStatus('Tous les créneaux ont été supprimés pour ce jour.', 'info');
+            });
+
+            prevButton.addEventListener('click', () => {
+                if (currentDayIndex > 0) {
+                    currentDayIndex -= 1;
+                    updateDayNavigation();
+                    renderCurrentDay();
+                }
+            });
+
+            nextButton.addEventListener('click', () => {
+                if (currentDayIndex < DAYS.length - 1) {
+                    currentDayIndex += 1;
+                    updateDayNavigation();
+                    renderCurrentDay();
+                }
             });
 
             const rawSchedule = JSON.parse(document.getElementById('schedule-data').textContent || '{}');
             let currentSchedule = ensureScheduleStructure(rawSchedule);
 
-            buildLayout();
-            renderSchedule();
+            renderHours();
+            updateDayNavigation();
+            renderCurrentDay();
             hideStatus();
         </script>
     </body>
