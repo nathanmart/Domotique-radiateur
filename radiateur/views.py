@@ -73,6 +73,37 @@ def _load_schedule() -> dict[str, list[dict[str, str]]]:
     return schedule
 
 
+MINUTES_IN_DAY = 24 * 60
+
+
+def _parse_time(value: str, *, allow_midnight: bool) -> int:
+    """Parse an HH:MM string into minutes, optionally allowing 24:00."""
+
+    if value == "24:00":
+        if allow_midnight:
+            return MINUTES_IN_DAY
+        raise ValueError("L'heure 24:00 n'est autorisée qu'en fin de créneau.")
+
+    try:
+        time = datetime.strptime(value, "%H:%M")
+    except ValueError as exc:
+        raise ValueError("Format d'heure invalide. Utilisez HH:MM.") from exc
+
+    minutes = time.hour * 60 + time.minute
+    if minutes >= MINUTES_IN_DAY:
+        raise ValueError("Les heures doivent être comprises entre 00:00 et 23:59.")
+    return minutes
+
+
+def _format_time(minutes: int) -> str:
+    """Convert minutes to HH:MM, handling 24:00 as a special case."""
+
+    if minutes == MINUTES_IN_DAY:
+        return "24:00"
+    hours, mins = divmod(minutes, 60)
+    return f"{hours:02d}:{mins:02d}"
+
+
 def _validate_schedule(payload: object) -> dict[str, list[dict[str, str]]]:
     """Validate and normalize the incoming schedule payload."""
 
@@ -89,7 +120,7 @@ def _validate_schedule(payload: object) -> dict[str, list[dict[str, str]]]:
         if not isinstance(raw_entries, list):
             raise ValueError(f"Le jour {day} doit contenir une liste de créneaux.")
 
-        normalized: list[dict[str, str]] = []
+        parsed_entries: list[tuple[int, int]] = []
         for raw_entry in raw_entries:
             if not isinstance(raw_entry, dict):
                 raise ValueError("Chaque créneau doit être un objet JSON.")
@@ -100,24 +131,26 @@ def _validate_schedule(payload: object) -> dict[str, list[dict[str, str]]]:
             if not isinstance(start, str) or not isinstance(end, str):
                 raise ValueError("Les heures doivent être des chaînes au format HH:MM.")
 
-            try:
-                start_time = datetime.strptime(start, "%H:%M")
-                end_time = datetime.strptime(end, "%H:%M")
-            except ValueError as exc:
-                raise ValueError("Format d'heure invalide. Utilisez HH:MM.") from exc
+            start_minutes = _parse_time(start, allow_midnight=False)
+            end_minutes = _parse_time(end, allow_midnight=True)
 
-            if start_time >= end_time:
+            if start_minutes >= end_minutes:
                 raise ValueError("L'heure de fin doit être postérieure à l'heure de début.")
 
-            normalized.append({"start": start_time.strftime("%H:%M"), "end": end_time.strftime("%H:%M")})
+            parsed_entries.append((start_minutes, end_minutes))
 
-        normalized.sort(key=lambda item: item["start"])
+        parsed_entries.sort(key=lambda entry: entry[0])
 
+        normalized: list[dict[str, str]] = []
         previous_end = None
-        for entry in normalized:
-            if previous_end and entry["start"] < previous_end:
+        for start_minutes, end_minutes in parsed_entries:
+            if previous_end is not None and start_minutes < previous_end:
                 raise ValueError("Les créneaux ne doivent pas se chevaucher.")
-            previous_end = entry["end"]
+            normalized.append({
+                "start": _format_time(start_minutes),
+                "end": _format_time(end_minutes),
+            })
+            previous_end = end_minutes
 
         schedule[day] = normalized
 
