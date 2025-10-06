@@ -63,8 +63,8 @@
         </div>
     </section>
 
-    {% for radiator, is_disabled in radiator_options %}
-        <section class="card radiator-card mb-3" data-radiator-name="{{ radiator }}" data-initial-disabled="{{ is_disabled|yesno:'true,false' }}">
+    {% for radiator, is_disabled in radiator_cards %}
+        <section class="card radiator-card mb-3 {% if is_disabled %}d-none{% endif %}" data-radiator-name="{{ radiator }}" data-initial-disabled="{{ is_disabled|yesno:'true,false' }}">
             <div class="card-body">
                 <div class="d-flex align-items-center justify-content-between">
                     <h2 class="h6 mb-0">{{ radiator }}</h2>
@@ -89,6 +89,9 @@
             Aucun radiateur n'est configuré.
         </div>
     {% endfor %}
+    <div id="no-radiator-alert" class="alert alert-warning {% if has_active_radiators %}d-none{% endif %}" role="alert">
+        Aucun radiateur n'est disponible.
+    </div>
 </div>
 
 <script>
@@ -154,6 +157,9 @@
     function updateGlobalSelection() {
         const unique = new Set();
         radiators.forEach((name) => {
+            if (disabledStates[name]) {
+                return;
+            }
             unique.add(normalizeState(lastStates[name]));
         });
 
@@ -192,6 +198,7 @@
         }
 
         card.classList.toggle('radiator-card-disabled', disabled);
+        card.classList.toggle('d-none', disabled);
 
         card.querySelectorAll('[data-mode]').forEach((button) => {
             const mode = button.dataset.mode;
@@ -200,6 +207,15 @@
             button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
             button.disabled = disabled && mode !== 'ECO';
         });
+    }
+
+    function updateEmptyState() {
+        const alert = document.getElementById('no-radiator-alert');
+        if (!alert) {
+            return;
+        }
+        const hasVisibleCard = Object.values(cards).some((card) => !card.classList.contains('d-none'));
+        alert.classList.toggle('d-none', hasVisibleCard);
     }
 
     function applyStateSnapshot(partialStates = {}, partialDisabled = {}) {
@@ -211,6 +227,7 @@
         });
 
         radiators.forEach((name) => updateRadiatorCard(name));
+        updateEmptyState();
         updateGlobalSelection();
     }
 

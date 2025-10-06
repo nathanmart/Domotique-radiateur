@@ -142,13 +142,18 @@ def index(request):
 
     enregistrer_log("Requete page 'index'")
     disabled_states = load_disabled_states()
+    radiator_cards: list[tuple[str, bool]] = []
+    has_active_radiators = False
+    for radiator in MQTT_SETTINGS.devices:
+        is_disabled = disabled_states.get(radiator, False)
+        if not is_disabled:
+            has_active_radiators = True
+        radiator_cards.append((radiator, is_disabled))
     context = {
         "radiators": MQTT_SETTINGS.devices,
         "disabled_states": disabled_states,
-        "radiator_options": [
-            (radiator, disabled_states.get(radiator, False))
-            for radiator in MQTT_SETTINGS.devices
-        ],
+        "radiator_cards": radiator_cards,
+        "has_active_radiators": has_active_radiators,
     }
     return render(request, "index.html", context)
 
