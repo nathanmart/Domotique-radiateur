@@ -1,16 +1,16 @@
 {% load static %}
 <!DOCTYPE html>
-<html>
+<html lang="fr">
 <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Contrôle Domotique</title>
-    <!-- Mobiscroll JS and CSS Includes -->
-    <link rel="stylesheet" href="{% static "css/mobiscroll.javascript.min.css" %}">
-    <script src="{% static "js/mobiscroll.javascript.min.js" %}"></script>
-
-    <link rel="stylesheet" href="{% static "css/index.css" %}">
-
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <link rel="stylesheet" href="{% static 'css/mobiscroll.javascript.min.css' %}">
+    <script src="{% static 'js/mobiscroll.javascript.min.js' %}"></script>
+    <link rel="stylesheet" href="{% static 'css/index.css' %}">
 </head>
-<body>
+<body class="bg-light">
 <div id="image_cache_COMFORT" data-image-url="{% static 'img/logo_confort.webp' %}" style="display: none;"></div>
 <div id="image_cache_ECO" data-image-url="{% static 'img/logo_eco.webp' %}" style="display: none;"></div>
 <div id="image_cache_None" data-image-url="{% static 'img/logo_erreur.webp' %}" style="display: none;"></div>
@@ -18,70 +18,67 @@
 <div id="image_cache_HORS GEL" data-image-url="{% static 'img/logo_hors_gel.webp' %}" style="display: none;"></div>
 <div id="image_cache_OFF" data-image-url="{% static 'img/logo_off.webp' %}" style="display: none;"></div>
 
-<h1>Contrôle Domotique</h1>
+<div class="container py-4">
+    <header class="text-center mb-4">
+        <h1 class="display-6 fw-semibold text-dark mb-0">Contrôle Domotique</h1>
+        <p class="text-muted mt-1 small">Pilotez vos radiateurs en un geste</p>
+    </header>
 
-<!-- Buttons are streched to fill the full width of the container.-->
-<div class="mbsc-button-group-justified">
-    <button id="boutonPlanning"  mbsc-button data-theme="ios" data-color="info" >Planning</button>
-    <button id="boutonOption"mbsc-button data-theme="ios" data-color="info">Options</button>
-</div>
-
-<div mbsc-segmented-group>
-    <label>
-        Confort
-        <input type="radio" mbsc-segmented name="modeSelect" value="COMFORT" onclick="envoyer_etat()">
-    </label>
-    <label>
-        Éco
-        <input type="radio" mbsc-segmented name="modeSelect" value="ECO" onclick="envoyer_etat()">
-    </label>
-</div>
-<div mbsc-segmented-group>
-    <label>
-        Hors Gel
-        <input type="radio" mbsc-segmented name="modeSelect" value="HORSGEL" onclick="envoyer_etat()">
-    </label>
-    <label>
-        Off
-        <input type="radio" mbsc-segmented name="modeSelect" value="OFF" onclick="envoyer_etat()">
-    </label>
-</div>
-
-<div class="mbsc-grid">
-    <div class="mbsc-row">
-        <div class="mbsc-col">
-            Chambre
+    <div class="row g-3 page-actions">
+        <div class="col-6">
+            <button id="boutonPlanning" type="button" class="btn btn-outline-primary w-100 py-3">Planning</button>
         </div>
-        <div class="mbsc-col">
-            <img id="Chambre" src="{% static 'img/logo_erreur.webp' %}" alt="ERREUR">
+        <div class="col-6">
+            <button id="boutonOption" type="button" class="btn btn-outline-secondary w-100 py-3">Options</button>
         </div>
     </div>
-    <div class="mbsc-row">
-        <div class="mbsc-col">
-            Cuisine
+
+    <section class="card mt-4 mode-section">
+        <div class="card-body">
+            <h2 class="h5 text-center mb-3">Mode global</h2>
+            <div class="row g-2">
+                <div class="col-6">
+                    <input type="radio" class="btn-check" name="modeSelect" id="mode-comfort" value="COMFORT" autocomplete="off" onclick="envoyer_etat()">
+                    <label class="btn btn-primary w-100 py-3" for="mode-comfort">Confort</label>
+                </div>
+                <div class="col-6">
+                    <input type="radio" class="btn-check" name="modeSelect" id="mode-eco" value="ECO" autocomplete="off" onclick="envoyer_etat()">
+                    <label class="btn btn-success w-100 py-3" for="mode-eco">Éco</label>
+                </div>
+                <div class="col-6">
+                    <input type="radio" class="btn-check" name="modeSelect" id="mode-horsgel" value="HORSGEL" autocomplete="off" onclick="envoyer_etat()">
+                    <label class="btn btn-warning w-100 py-3" for="mode-horsgel">Hors gel</label>
+                </div>
+                <div class="col-6">
+                    <input type="radio" class="btn-check" name="modeSelect" id="mode-off" value="OFF" autocomplete="off" onclick="envoyer_etat()">
+                    <label class="btn btn-outline-dark w-100 py-3" for="mode-off">Off</label>
+                </div>
+            </div>
         </div>
-        <div class="mbsc-col">
-            <img id="Cuisine" src="{% static 'img/logo_erreur.webp' %}" alt="ERREUR">
+    </section>
+
+    <section class="status-section mt-4">
+        <h2 class="h6 text-uppercase text-muted mb-3">État des pièces</h2>
+        <div class="row g-3">
+            <div class="col-12">
+                <div class="card shadow-sm status-card">
+                    <div class="card-body d-flex align-items-center justify-content-between">
+                        <span class="room-name">Chambre</span>
+                        <img id="Chambre" src="{% static 'img/logo_erreur.webp' %}" alt="ERREUR" class="status-icon">
+                    </div>
+                </div>
+            </div>
+            <div class="col-12">
+                <div class="card shadow-sm status-card">
+                    <div class="card-body d-flex align-items-center justify-content-between">
+                        <span class="room-name">Cuisine</span>
+                        <img id="Cuisine" src="{% static 'img/logo_erreur.webp' %}" alt="ERREUR" class="status-icon">
+                    </div>
+                </div>
+            </div>
         </div>
-    </div>
+    </section>
 </div>
-
-<div></div>
-
-{# Pour affichage textuel, non utilisé#}
-{#<button mbsc-button data-theme="ios" id="checkerButton">Checker</button>#}
-{#<table>#}
-{#    <tr>#}
-{#        <td>Radiateur chambre</td>#}
-{#        <td><span id="chambreText">DEFAUT</span></td>#}
-{#    </tr>#}
-{#    <tr>#}
-{#        <td>Radiateur cuisine</td>#}
-{#        <td><span id="cuisineText">DEFAUT</span></td>#}
-{#    </tr>#}
-{#</table>#}
-{##}
-
 
 <script>
     const modeSelect = document.getElementsByName("modeSelect")
@@ -173,5 +170,6 @@
 
 
 </script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
 </body>
 </html>

@@ -1,33 +1,45 @@
-/*Boutons choix de page*/
-.mbsc-button-group-justified button {
-    height: 10vh; /* 30% de la hauteur de la fenêtre de visualisation */
-    font-size: 30px;
+body {
+    background-color: #f8f9fa;
 }
 
-/*Bouton choix de mode*/
-div[mbsc-segmented-group] label {
-    height: 10vh;
-    font-size: 5vh;
+.page-actions .btn {
+    font-size: 1.1rem;
+    border-width: 2px;
 }
 
-
-/*Image des états*/
-.mbsc-grid .mbsc-col img {
-    width: 40vw;  /* ou une autre valeur ou pourcentage */
-    height: auto;  /* conserve les proportions de l'image */
-    font-size: 300px;
-}
-/*Texte des états*/
-.mbsc-col{
-    font-size: 6vw;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+.mode-section .btn {
+    font-size: 1.05rem;
+    font-weight: 600;
+    border-width: 2px;
 }
 
-h1 {
-    font-size: 6vw;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+.status-section .status-card {
+    border: none;
+    border-radius: 1rem;
+}
+
+.status-section .card-body {
+    padding: 1.25rem;
+}
+
+.status-section .room-name {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #212529;
+}
+
+.status-section .status-icon {
+    width: 64px;
+    height: auto;
+}
+
+@media (min-width: 576px) {
+    .page-actions .btn,
+    .mode-section .btn {
+        font-size: 1.15rem;
+    }
+
+    .status-section .room-name {
+        font-size: 1.2rem;
+    }
 }
