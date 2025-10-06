@@ -14,6 +14,62 @@ from .config import APP_LOG_FILE, MQTT_SETTINGS, TIMEZONE
 
 _liste_etat: Dict[str, str] = {}
 
+OPTIONS_FILE_PATH = Path(__file__).resolve().parent / "templates" / "options.json"
+
+
+def _default_disabled_states() -> Dict[str, bool]:
+    """Return the default disabled state for each configured radiator."""
+
+    return {radiator: False for radiator in MQTT_SETTINGS.devices}
+
+
+def load_disabled_states() -> Dict[str, bool]:
+    """Load the per-radiator disabled configuration from disk."""
+
+    defaults = _default_disabled_states()
+    if not OPTIONS_FILE_PATH.exists():
+        return defaults
+
+    try:
+        raw = json.loads(OPTIONS_FILE_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return defaults
+
+    if not isinstance(raw, dict):
+        return defaults
+
+    for radiator, value in raw.items():
+        if radiator in defaults:
+            defaults[radiator] = bool(value)
+
+    return defaults
+
+
+def save_disabled_states(states: Dict[str, bool]) -> Dict[str, bool]:
+    """Persist the disabled map to disk and return the sanitized structure."""
+
+    sanitized = _default_disabled_states()
+    for radiator, value in states.items():
+        if radiator in sanitized:
+            sanitized[radiator] = bool(value)
+
+    OPTIONS_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    OPTIONS_FILE_PATH.write_text(
+        json.dumps(sanitized, ensure_ascii=False, indent=4), encoding="utf-8"
+    )
+    return sanitized
+
+
+def update_disabled_state(radiator: str, disabled: bool) -> Dict[str, bool]:
+    """Update and persist the disabled flag for a specific radiator."""
+
+    states = load_disabled_states()
+    if radiator not in states:
+        raise KeyError(radiator)
+
+    states[radiator] = bool(disabled)
+    return save_disabled_states(states)
+
 
 def set_liste_etat(liste: Dict[str, str]) -> None:
     """Register the shared dictionary used to track device states."""
@@ -38,23 +94,38 @@ def enregistrer_log(message: str, fichier: Path | None = None) -> None:
         file.write(f"[{timestamp}] {message}\n")
 
 
-def envoyer_changement_etat_mqtt(mode: str, mqtt_client, liste_radiateur: Iterable[str] | None = None) -> bool:
-    """Send the desired mode to all registered radiators via MQTT."""
+def envoyer_changement_etat_mqtt(
+    mode: str, mqtt_client, liste_radiateur: Iterable[str] | None = None
+) -> Dict[str, str] | None:
+    """Send the desired mode to the selected radiators via MQTT.
+
+    The function honours the disabled configuration and forces the ECO mode
+    when a radiator has been deactivated from the options page.
+    """
 
     liste_radiateur = list(liste_radiateur or MQTT_SETTINGS.devices)
+    if not liste_radiateur:
+        return {}
+
     if not mqtt_client:
         enregistrer_log("Aucun client MQTT disponible pour envoyer le changement d'état")
-        return False
+        return None
+
+    disabled_map = load_disabled_states()
+    applied_modes: Dict[str, str] = {}
 
     for appareil in liste_radiateur:
+        forced_mode = "ECO" if disabled_map.get(appareil) else mode
         message = {
             "FROM": "Django",
             "TO": appareil,
-            "COMMAND": mode,
+            "COMMAND": forced_mode,
         }
         mqtt_client.publish(str(message), MQTT_SETTINGS.topic)
-        enregistrer_log(f"Modification état: {appareil} --> {mode}")
-    return True
+        applied_modes[appareil] = forced_mode
+        enregistrer_log(f"Modification état: {appareil} --> {forced_mode}")
+
+    return applied_modes
 
 
 def maj_etat_selon_planning(mqtt_client) -> None:

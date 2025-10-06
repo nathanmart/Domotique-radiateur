@@ -5,6 +5,7 @@ from . import views
 urlpatterns = [
     path("", views.index, name="index"),
     path("planning/", views.planning, name="planning"),
+    path("options/", views.options, name="options"),
     path("changement_etat/", views.changement_etat, name="changement_etat"),
     path("retourner_etat/", views.retourner_etat, name="retourner_etat"),
     # path("getjson/", views.getjson, name="datajson"),

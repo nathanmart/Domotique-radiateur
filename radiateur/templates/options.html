@@ -1,0 +1,103 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Options</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <link rel="stylesheet" href="{% static 'css/index.css' %}">
+</head>
+<body class="bg-light">
+<div class="container-fluid main-panel py-3">
+    <div class="d-flex align-items-center justify-content-between mb-3">
+        <button id="backButton" type="button" class="btn btn-outline-secondary btn-icon">Retour</button>
+        <h1 class="h5 text-dark mb-0">Options</h1>
+        <div class="btn-placeholder"></div>
+    </div>
+
+    <p class="text-muted small mb-3">
+        Désactivez un radiateur pour forcer en permanence le mode Éco. Les radiateurs désactivés ne répondront plus aux commandes depuis la page principale tant qu'ils ne sont pas réactivés ici.
+    </p>
+
+    <div id="statusMessage" class="alert d-none" role="alert"></div>
+
+    {% for radiator, is_disabled in radiator_options %}
+        <div class="card option-card mb-3">
+            <div class="card-body d-flex align-items-center justify-content-between">
+                <div>
+                    <h2 class="h6 mb-1">{{ radiator }}</h2>
+                    <p class="option-description mb-0">Forcer le mode Éco en permanence</p>
+                </div>
+                <div class="form-check form-switch m-0">
+                    <input class="form-check-input radiator-toggle" type="checkbox" role="switch" id="toggle-{{ forloop.counter0 }}" data-radiator="{{ radiator }}" {% if is_disabled %}checked{% endif %}>
+                    <label class="form-check-label visually-hidden" for="toggle-{{ forloop.counter0 }}">Désactiver {{ radiator }}</label>
+                </div>
+            </div>
+        </div>
+    {% empty %}
+        <div class="alert alert-warning" role="alert">
+            Aucun radiateur n'est configuré pour le moment.
+        </div>
+    {% endfor %}
+</div>
+
+<script>
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.startsWith(name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+
+    function showMessage(type, message) {
+        const container = document.getElementById('statusMessage');
+        container.className = 'alert alert-' + type;
+        container.textContent = message;
+    }
+
+    document.querySelectorAll('.radiator-toggle').forEach((toggle) => {
+        toggle.addEventListener('change', function () {
+            const radiator = this.dataset.radiator;
+            const disabled = this.checked;
+            fetch('/options/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken'),
+                },
+                body: JSON.stringify({ radiator, disabled }),
+            })
+                .then((response) => {
+                    if (!response.ok) {
+                        throw new Error('Request failed');
+                    }
+                    return response.json();
+                })
+                .then(() => {
+                    showMessage('success', disabled
+                        ? `${radiator} est maintenant en mode Éco forcé.`
+                        : `${radiator} peut de nouveau changer de mode.`);
+                })
+                .catch(() => {
+                    this.checked = !disabled;
+                    showMessage('danger', `Impossible de mettre à jour ${radiator}. Réessayez plus tard.`);
+                });
+        });
+    });
+
+    document.getElementById('backButton').addEventListener('click', () => {
+        window.location.href = '/';
+    });
+</script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+</body>
+</html>
