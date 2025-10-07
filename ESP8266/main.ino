@@ -1,15 +1,27 @@
 #include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
+#include <EEPROM.h>
+#include <cstring>
 
 
 #define LED_BUILTIN 2
 
-const char* ssid = "Bbox-1A72D098";
-const char* password = "N2vGETVJ93ueSXseMX";
-const char* mqtt_server = "192.168.1.151";
+const uint16_t mqtt_port = 1883;
 const char* mqtt_topic = "test";
-const char* mqtt_client_id = "Chambre"; 
+const char* mqtt_client_id = "Chambre";
+
+const char* ap_ssid = "Radiateur-Setup";
+const char* default_mqtt_server = "192.168.1.151";
+const int EEPROM_SIZE = 256;
+const int RECONNECT_INTERVAL = 10000; // 10 secondes
+
+struct DeviceConfig {
+  char ssid[32];
+  char password[64];
+  char mqttServer[64];
+};
 
 
 
@@ -19,10 +31,31 @@ const int pinLow = 12;
 
 WiFiClient espClient;
 PubSubClient client(espClient);
+ESP8266WebServer server(80);
+
+DeviceConfig deviceConfig;
+bool credentialsLoaded = false;
+unsigned long lastReconnectAttempt = 0;
+bool apActive = false;
+
+void startAccessPoint();
+void setupServer();
+void handleRoot();
+void handleSave();
+bool loadConfig();
+void saveConfig(const DeviceConfig &data);
+bool connectToSavedWifi(bool blocking = false);
 
 void setup() {
   // Serial.begin(115200);
   // delay(10);
+
+  EEPROM.begin(EEPROM_SIZE);
+  credentialsLoaded = loadConfig();
+  if (strlen(deviceConfig.mqttServer) == 0) {
+    strncpy(deviceConfig.mqttServer, default_mqtt_server, sizeof(deviceConfig.mqttServer) - 1);
+    deviceConfig.mqttServer[sizeof(deviceConfig.mqttServer) - 1] = '\0';
+  }
 
   pinMode(pinHigh, OUTPUT);
   pinMode(pinLow, OUTPUT);
@@ -30,27 +63,40 @@ void setup() {
 
   digitalWrite(pinHigh, LOW);
   digitalWrite(pinLow, LOW);
-  
+
   clignoter(3000, 500);
 
-  // Connexion au réseau Wi-Fi
-  // Serial.println();
-  // Serial.print("Connexion au réseau Wi-Fi ");
-  // Serial.println(ssid);
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    // Serial.print(".");
-  }
-  // Serial.println();
-  // Serial.println("Connecté au réseau Wi-Fi");
-  
+  WiFi.mode(WIFI_AP_STA);
+  startAccessPoint();
+  setupServer();
+
+  connectToSavedWifi(true);
+
   // Configuration du client MQTT
-  client.setServer(mqtt_server, 1883);
+  client.setServer(deviceConfig.mqttServer, mqtt_port);
   client.setCallback(callback);
 }
 
 void loop() {
+  server.handleClient();
+
+  if (WiFi.status() != WL_CONNECTED) {
+    if (!apActive) {
+      startAccessPoint();
+    }
+    unsigned long now = millis();
+    if (credentialsLoaded && now - lastReconnectAttempt > RECONNECT_INTERVAL) {
+      lastReconnectAttempt = now;
+      connectToSavedWifi();
+    }
+    return;
+  }
+
+  if (apActive) {
+    WiFi.softAPdisconnect(true);
+    apActive = false;
+  }
+
   if (!client.connected()) {
     reconnect();
   }
@@ -133,6 +179,130 @@ void reconnect() {
       delay(5000);
     }
   }
+}
+
+void startAccessPoint() {
+  WiFi.softAP(ap_ssid);
+  apActive = true;
+}
+
+void setupServer() {
+  server.on("/", HTTP_GET, handleRoot);
+  server.on("/save", HTTP_POST, handleSave);
+  server.begin();
+}
+
+void handleRoot() {
+  String page = "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Configuration WiFi</title></head><body>";
+  page += "<h1>Configuration du WiFi</h1>";
+  page += "<p>Statut actuel : ";
+  if (WiFi.status() == WL_CONNECTED) {
+    page += "connecté à " + WiFi.SSID();
+  } else {
+    page += "non connecté";
+  }
+  page += "</p>";
+  page += "<form method='POST' action='/save'>";
+  page += "<label>SSID : <input name='ssid' value='";
+  if (credentialsLoaded) {
+    page += deviceConfig.ssid;
+  }
+  page += "' required></label><br><br>";
+  page += "<label>Mot de passe : <input name='password' type='password' placeholder='Mot de passe WiFi'></label><br><br>";
+  page += "<label>Serveur MQTT : <input name='mqtt_server' value='";
+  if (strlen(deviceConfig.mqttServer) > 0) {
+    page += deviceConfig.mqttServer;
+  }
+  page += "' required></label><br><br>";
+  page += "<button type='submit'>Enregistrer</button></form></body></html>";
+  server.send(200, "text/html", page);
+}
+
+void handleSave() {
+  if (!server.hasArg("ssid") || !server.hasArg("mqtt_server")) {
+    server.send(400, "text/plain", "Paramètres manquants");
+    return;
+  }
+
+  String newSsid = server.arg("ssid");
+  String newPassword = server.arg("password");
+  String newMqttServer = server.arg("mqtt_server");
+
+  newSsid.trim();
+  newPassword.trim();
+  newMqttServer.trim();
+
+  if (newSsid.length() == 0 || newMqttServer.length() == 0) {
+    server.send(400, "text/plain", "Le SSID et l'adresse du serveur MQTT sont obligatoires");
+    return;
+  }
+
+  newSsid.toCharArray(deviceConfig.ssid, sizeof(deviceConfig.ssid));
+  newPassword.toCharArray(deviceConfig.password, sizeof(deviceConfig.password));
+  newMqttServer.toCharArray(deviceConfig.mqttServer, sizeof(deviceConfig.mqttServer));
+  saveConfig(deviceConfig);
+  credentialsLoaded = strlen(deviceConfig.ssid) > 0;
+
+  client.setServer(deviceConfig.mqttServer, mqtt_port);
+  client.disconnect();
+
+  bool connected = connectToSavedWifi(true);
+
+  if (connected) {
+    reconnect();
+    server.send(200, "text/html", "<html><body><h1>Connexion réussie</h1><p>L'ESP8266 est connecté au réseau \"" + newSsid + "\" et utilisera le serveur MQTT \"" + newMqttServer + "\".</p></body></html>");
+  } else {
+    server.send(200, "text/html", "<html><body><h1>Connexion impossible</h1><p>Vérifiez les informations saisies et réessayez.</p></body></html>");
+  }
+}
+
+bool loadConfig() {
+  memset(&deviceConfig, 0, sizeof(deviceConfig));
+  EEPROM.get(0, deviceConfig);
+
+  bool wifiConfigured = deviceConfig.ssid[0] != '\0' && deviceConfig.ssid[0] != char(0xFF);
+  bool mqttConfigured = deviceConfig.mqttServer[0] != '\0' && deviceConfig.mqttServer[0] != char(0xFF);
+
+  if (!wifiConfigured) {
+    memset(deviceConfig.ssid, 0, sizeof(deviceConfig.ssid));
+    memset(deviceConfig.password, 0, sizeof(deviceConfig.password));
+  }
+  if (!mqttConfigured) {
+    memset(deviceConfig.mqttServer, 0, sizeof(deviceConfig.mqttServer));
+  }
+
+  return wifiConfigured;
+}
+
+void saveConfig(const DeviceConfig &data) {
+  EEPROM.put(0, data);
+  EEPROM.commit();
+}
+
+bool connectToSavedWifi(bool blocking) {
+  if (!credentialsLoaded || strlen(deviceConfig.ssid) == 0) {
+    return false;
+  }
+
+  WiFi.begin(deviceConfig.ssid, deviceConfig.password);
+  lastReconnectAttempt = millis();
+
+  if (!blocking) {
+    return true;
+  }
+
+  unsigned long startAttempt = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 15000) {
+    delay(500);
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    WiFi.softAPdisconnect(true);
+    apActive = false;
+    return true;
+  }
+
+  return false;
 }
 
 void clignoter(int totalDuration, int blinkSpeed) {

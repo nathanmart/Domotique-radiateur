@@ -294,5 +294,6 @@ def options(request):
             (radiator, disabled_states.get(radiator, False))
             for radiator in MQTT_SETTINGS.devices
         ],
+        "mqtt_host": MQTT_SETTINGS.host,
     }
     return render(request, "options.html", context)
