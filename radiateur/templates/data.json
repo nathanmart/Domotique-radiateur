@@ -1,1 +1,33 @@
-[]
+{
+    "monday": [
+        {
+            "start": "02:45",
+            "end": "05:00"
+        },
+        {
+            "start": "08:00",
+            "end": "15:30"
+        }
+    ],
+    "tuesday": [
+        {
+            "start": "06:30",
+            "end": "16:30"
+        }
+    ],
+    "wednesday": [
+        {
+            "start": "08:00",
+            "end": "15:30"
+        }
+    ],
+    "thursday": [
+        {
+            "start": "06:30",
+            "end": "16:30"
+        }
+    ],
+    "friday": [],
+    "saturday": [],
+    "sunday": []
+}
