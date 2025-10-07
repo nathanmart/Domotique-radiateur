@@ -1,32 +1,40 @@
-# Analyse du firmware ESP8266
+# Fonctionnement du firmware ESP8266
 
-## Fonctionnement général
+Ce firmware transforme l'ESP8266 en radiateur connecté piloté via MQTT. Il combine un portail de configuration Wi-Fi/MQTT et un client MQTT qui exécute les commandes reçues.
 
-Le firmware `main.ino` configure un ESP8266 comme client Wi-Fi et MQTT après une phase de provisionnement local. Au démarrage, le module crée un point d'accès ouvert `Radiateur-Setup` et héberge une page de configuration. L'utilisateur y saisit le SSID, le mot de passe Wi-Fi et **l'adresse IP du serveur MQTT**. Ces informations sont sauvegardées dans l'EEPROM et réutilisées aux démarrages suivants. Une fois connecté au réseau et au broker, l'appareil écoute sur le topic `test` et exécute une commande lorsque le message reçu contient les champs JSON `FROM`, `TO` et `COMMAND`. Les commandes `COMFORT`, `ECO`, `OFF`, `HORSGEL`, `STATE` déclenchent respectivement les fonctions qui pilotent les broches de sortie. La fonction `checkEtat()` renvoie l'état actuel en publiant un message JSON.
+## Démarrage et portail de configuration
 
-## Points qui fonctionnent bien
+1. **Mode point d'accès** : à la mise sous tension, l'ESP8266 active `Radiateur-Setup`, un point d'accès ouvert.
+2. **Serveur web intégré** : en se connectant à ce réseau puis en ouvrant `http://192.168.4.1/`, on accède à un formulaire permettant de saisir :
+   - le SSID du réseau Wi-Fi à rejoindre ;
+   - le mot de passe correspondant (facultatif si le Wi-Fi est ouvert) ;
+   - l'adresse IP du serveur MQTT que l'appareil doit contacter.
+3. **Enregistrement** : après validation, les informations sont stockées dans l'EEPROM (`DeviceConfig`). Elles sont automatiquement réutilisées aux démarrages suivants.
+4. **Tentative de connexion** : le module coupe son point d'accès et tente de rejoindre le Wi-Fi saisi. Une fois le Wi-Fi opérationnel, le client MQTT est configuré avec l'IP fournie.
 
-- **Portail de configuration autonome** : le point d'accès intégré et le serveur HTTP permettent de reconfigurer le Wi-Fi et l'IP du broker sans recompiler le firmware.【F:ESP8266/main.ino†L48-L115】【F:ESP8266/main.ino†L186-L251】
-- **Connexion Wi-Fi et MQTT** : les fonctions `setup()` et `reconnect()` gèrent correctement la connexion au réseau Wi-Fi et la reconnexion MQTT si la liaison se perd.【F:ESP8266/main.ino†L48-L115】
-- **Traitement JSON** : l'utilisation de `ArduinoJson` pour décoder les messages et vérifier les champs garantit que seules les commandes destinées à ce client (`TO == "Chambre"`) sont exécutées.【F:ESP8266/main.ino†L117-L174】
-- **Pilotage des sorties** : les fonctions `modeComfort()`, `modeEco()`, `modeHorsGel()` et `modeOff()` écrivent clairement les niveaux logiques attendus pour chaque mode sur les deux sorties configurées.【F:ESP8266/main.ino†L118-L136】
-- **Retour d'état** : `checkEtat()` lit les sorties actuelles, dérive le mode et publie un message JSON structuré à destination du serveur Django.【F:ESP8266/main.ino†L138-L158】
+Si aucune configuration n'est présente, un serveur par défaut `192.168.1.151` est utilisé jusqu'à ce qu'une valeur soit fournie via l'interface.
 
-## Points à améliorer ou risques
+## Fonctionnement réseau quotidien
 
-1. **Stockage non chiffré** : les identifiants et l'IP du broker restent enregistrés en clair dans l'EEPROM. Sur un module compromis physiquement, ils peuvent être extraits. L'ajout d'un chiffrement léger ou d'un mot de passe pour le portail limiterait ce risque.【F:ESP8266/main.ino†L189-L251】
-2. **Gestion minimale des erreurs** : en cas d'échec de connexion Wi-Fi ou MQTT, le code boucle indéfiniment sans rétroaction ni délai exponentiel. Ajouter des traces série ou un mécanisme de redémarrage éviterait les blocages silencieux.【F:ESP8266/main.ino†L74-L115】【F:ESP8266/main.ino†L174-L185】
-3. **Sécurité MQTT** : la connexion au broker se fait sans authentification ni TLS. Si le réseau n'est pas isolé, un acteur malveillant peut publier des commandes ou écouter l'état. Envisager l'usage d'identifiants MQTT ou d'un canal chiffré.
-4. **Validation des commandes** : les valeurs du champ `COMMAND` sont comparées à des chaînes en clair. Il serait prudent de prévoir un `else` qui ignore explicitement les commandes inconnues et éventuellement journalise la tentative pour faciliter le diagnostic.【F:ESP8266/main.ino†L129-L174】
-5. **État des broches au démarrage** : les sorties sont mises à `LOW` immédiatement, ce qui force le mode confort avant de recevoir une commande. Selon l'installation, il pourrait être préférable d'attendre l'ordre du serveur ou de mémoriser le dernier état connu.【F:ESP8266/main.ino†L62-L71】
-6. **LED de statut** : la fonction `clignoter()` est utilisée pour signaler l'initialisation, mais la LED reste ensuite allumée (`HIGH`). Ajouter un indicateur visuel pour la connexion Wi-Fi/MQTT faciliterait le diagnostic sur site.【F:ESP8266/main.ino†L66-L71】【F:ESP8266/main.ino†L115-L123】
-7. **Robustesse JSON** : si un message manque un champ attendu, `doc["..."]` renverra une chaîne vide. Tester la présence des clés (avec `containsKey`) permettrait de rejeter proprement les messages mal formés avant d'accéder aux valeurs.【F:ESP8266/main.ino†L129-L174】
+- La boucle principale entretient en permanence la page de configuration (`server.handleClient()`) et surveille l'état Wi-Fi. Si la connexion Wi-Fi tombe, l'ESP8266 relance son point d'accès de configuration et retente régulièrement de rejoindre le réseau connu (`connectToSavedWifi`).
+- Dès que le Wi-Fi est établi, l'AP est coupé et le client MQTT se reconnecte automatiquement au broker défini (`reconnect`).
 
-## Pistes d'évolution
+## Pilotage par MQTT
 
-- Externaliser la configuration Wi-Fi et MQTT (SPIFFS, LittleFS, OTA) pour pouvoir reconfigurer les modules sans reprogrammer.
-- Ajouter une commande `PING`/`PONG` ou un `last will` MQTT pour surveiller la disponibilité des radiateurs.
-- Mettre en place un watchdog logiciel ou matériel pour redémarrer automatiquement en cas de blocage prolongé.
-- Activer la liaison série (`Serial.begin`) pendant le développement pour faciliter le débogage, puis la désactiver uniquement en production.
+- Le client s'abonne au topic `test` avec l'identifiant `Chambre`.
+- Lorsqu'un message JSON est reçu, les champs `FROM`, `TO` et `COMMAND` sont vérifiés.
+- Si le message provient de `Django` et est destiné à `Chambre`, la commande associée déclenche les fonctions : `modeComfort`, `modeEco`, `modeOff`, `modeHorsGel`, `clignoter` ou `checkEtat`.
+- `checkEtat` publie l'état courant sur le même topic au format JSON.
 
-Ces ajustements amélioreront la sécurité, la résilience et la maintenabilité du firmware.
+## Reconfigurer le Wi-Fi ou le serveur MQTT
+
+Pour changer de Wi-Fi, de mot de passe ou d'adresse de broker :
+
+1. **Forcer le mode configuration** :
+   - Coupez l'alimentation du module puis rallumez-le ; ou
+   - Attendez qu'il perde la connexion (par exemple, éloignez le point d'accès actuel). Au prochain échec de liaison, `Radiateur-Setup` réapparaît automatiquement.
+2. **Connexion au portail** : connectez-vous au Wi-Fi `Radiateur-Setup`, ouvrez `http://192.168.4.1/` et mettez à jour les champs souhaités.
+3. **Validation** : après enregistrement, l'ESP8266 tente immédiatement de rejoindre le nouveau réseau et, si la connexion aboutit, se connecte au broker MQTT à l'adresse indiquée.
+4. **Retour au service** : une fois la liaison établie, le point d'accès de configuration est coupé. Les nouvelles valeurs sont mémorisées pour les démarrages futurs.
+
+Cette procédure peut être répétée autant de fois que nécessaire lors d'un déménagement ou d'une modification de la configuration réseau.
