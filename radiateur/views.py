@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import time
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +12,8 @@ from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt
+
+from typing import Optional
 
 from .config import MQTT_SETTINGS
 from .runtime import get_cached_states, get_mqtt_client
@@ -294,6 +297,29 @@ def options(request):
             (radiator, disabled_states.get(radiator, False))
             for radiator in MQTT_SETTINGS.devices
         ],
-        "mqtt_host": MQTT_SETTINGS.host,
+        "mqtt_host": _detect_local_ip(MQTT_SETTINGS.host),
     }
     return render(request, "options.html", context)
+
+
+def _detect_local_ip(default: str) -> str:
+    """Return the best local IPv4 address for the MQTT broker."""
+
+    candidate: Optional[str] = None
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))
+            candidate = sock.getsockname()[0]
+    except OSError:
+        candidate = None
+
+    if not candidate or candidate.startswith("127."):
+        try:
+            hostname_ip = socket.gethostbyname(socket.gethostname())
+        except OSError:
+            hostname_ip = ""
+        if hostname_ip and not hostname_ip.startswith("127."):
+            candidate = hostname_ip
+
+    return candidate or default
