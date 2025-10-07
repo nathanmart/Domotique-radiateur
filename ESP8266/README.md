@@ -5,7 +5,7 @@ Ce firmware transforme l'ESP8266 en radiateur connecté piloté via MQTT. Il com
 ## Démarrage et portail de configuration
 
 1. **Mode point d'accès** : à la mise sous tension, l'ESP8266 active `Radiateur-Setup`, un point d'accès ouvert.
-2. **Serveur web intégré** : en se connectant à ce réseau puis en ouvrant `http://192.168.4.1/`, on accède à un formulaire permettant de saisir :
+2. **Portail captif** : dès qu'un appareil se connecte à ce Wi-Fi, un portail de connexion s'ouvre automatiquement (comme sur les hotspots publics). À défaut, l'interface reste accessible via `http://192.168.4.1/`. Le formulaire permet de saisir :
    - le SSID du réseau Wi-Fi à rejoindre ;
    - le mot de passe correspondant (facultatif si le Wi-Fi est ouvert) ;
    - l'adresse IP du serveur MQTT que l'appareil doit contacter.

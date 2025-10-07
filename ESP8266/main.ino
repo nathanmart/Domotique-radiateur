@@ -3,6 +3,7 @@
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <EEPROM.h>
+#include <DNSServer.h>
 #include <cstring>
 
 
@@ -16,6 +17,7 @@ const char* ap_ssid = "Radiateur-Setup";
 const char* default_mqtt_server = "192.168.1.151";
 const int EEPROM_SIZE = 256;
 const int RECONNECT_INTERVAL = 10000; // 10 secondes
+const byte DNS_PORT = 53;
 
 struct DeviceConfig {
   char ssid[32];
@@ -32,6 +34,7 @@ const int pinLow = 12;
 WiFiClient espClient;
 PubSubClient client(espClient);
 ESP8266WebServer server(80);
+DNSServer dnsServer;
 
 DeviceConfig deviceConfig;
 bool credentialsLoaded = false;
@@ -39,9 +42,12 @@ unsigned long lastReconnectAttempt = 0;
 bool apActive = false;
 
 void startAccessPoint();
+void stopAccessPoint();
 void setupServer();
 void handleRoot();
 void handleSave();
+void handleNotFound();
+bool handleCaptivePortal();
 bool loadConfig();
 void saveConfig(const DeviceConfig &data);
 bool connectToSavedWifi(bool blocking = false);
@@ -80,6 +86,10 @@ void setup() {
 void loop() {
   server.handleClient();
 
+  if (apActive) {
+    dnsServer.processNextRequest();
+  }
+
   if (WiFi.status() != WL_CONNECTED) {
     if (!apActive) {
       startAccessPoint();
@@ -93,8 +103,7 @@ void loop() {
   }
 
   if (apActive) {
-    WiFi.softAPdisconnect(true);
-    apActive = false;
+    stopAccessPoint();
   }
 
   if (!client.connected()) {
@@ -183,16 +192,23 @@ void reconnect() {
 
 void startAccessPoint() {
   WiFi.softAP(ap_ssid);
+  IPAddress apIP = WiFi.softAPIP();
+  dnsServer.start(DNS_PORT, "*", apIP);
   apActive = true;
 }
 
 void setupServer() {
   server.on("/", HTTP_GET, handleRoot);
   server.on("/save", HTTP_POST, handleSave);
+  server.onNotFound(handleNotFound);
   server.begin();
 }
 
 void handleRoot() {
+  if (handleCaptivePortal()) {
+    return;
+  }
+
   String page = "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Configuration WiFi</title></head><body>";
   page += "<h1>Configuration du WiFi</h1>";
   page += "<p>Statut actuel : ";
@@ -256,6 +272,12 @@ void handleSave() {
   }
 }
 
+void stopAccessPoint() {
+  dnsServer.stop();
+  WiFi.softAPdisconnect(true);
+  apActive = false;
+}
+
 bool loadConfig() {
   memset(&deviceConfig, 0, sizeof(deviceConfig));
   EEPROM.get(0, deviceConfig);
@@ -297,12 +319,41 @@ bool connectToSavedWifi(bool blocking) {
   }
 
   if (WiFi.status() == WL_CONNECTED) {
-    WiFi.softAPdisconnect(true);
-    apActive = false;
+    stopAccessPoint();
     return true;
   }
 
   return false;
+}
+
+bool handleCaptivePortal() {
+  if (!apActive) {
+    return false;
+  }
+
+  String host = server.hostHeader();
+  if (!host.length()) {
+    return false;
+  }
+
+  IPAddress apIP = WiFi.softAPIP();
+  String apIpStr = apIP.toString();
+
+  if (host == apIpStr || host == String(ap_ssid) || host == apIpStr + ":80") {
+    return false;
+  }
+
+  server.sendHeader("Location", String("http://") + apIpStr);
+  server.send(302, "text/html", "<!DOCTYPE html><html><head><meta http-equiv='refresh' content='0; url=http://" + apIpStr + "' /></head><body>Redirection vers le portail de configuration…</body></html>");
+  return true;
+}
+
+void handleNotFound() {
+  if (handleCaptivePortal()) {
+    return;
+  }
+
+  server.send(404, "text/plain", "Not found");
 }
 
 void clignoter(int totalDuration, int blinkSpeed) {
