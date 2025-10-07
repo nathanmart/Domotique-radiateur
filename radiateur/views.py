@@ -16,8 +16,8 @@ from django.views.decorators.csrf import csrf_exempt
 
 from typing import Optional
 
-from .config import MQTT_SETTINGS
-from .models import RadiatorDevice
+from .config import MQTT_SETTINGS, TIMEZONE
+from .models import add_device, load_devices
 from .runtime import get_cached_states, get_mqtt_client
 from .services import (
     demander_etat_au_appareil,
@@ -307,7 +307,16 @@ def options(request):
             for radiator in radiators
         ],
         "mqtt_host": _detect_local_ip(MQTT_SETTINGS.host),
-        "custom_devices": list(RadiatorDevice.objects.order_by("name")),
+        "custom_devices": [
+            {
+                "name": device.name,
+                "ip_address": device.ip_address,
+                "added_at_display": device.added_at.astimezone(TIMEZONE).strftime(
+                    "%d/%m/%Y %H:%M"
+                ),
+            }
+            for device in load_devices()
+        ],
     }
     return render(request, "options.html", context)
 
@@ -358,7 +367,10 @@ def devices(request):
     else:
         return JsonResponse({"error": "Adresse IP invalide."}, status=400)
 
-    device = RadiatorDevice.objects.create(name=name, ip_address=normalized_ip)
+    try:
+        device = add_device(name, normalized_ip)
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=409)
 
     states = load_disabled_states()
     if name not in states:
@@ -377,6 +389,7 @@ def devices(request):
         {
             "name": device.name,
             "ip_address": device.ip_address,
+            "added_at": device.added_at.isoformat(),
         },
         status=201,
     )

@@ -9,10 +9,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Iterable, List
 
-from django.db import DatabaseError
-
 from .config import APP_LOG_FILE, MQTT_SETTINGS, TIMEZONE
-from .models import RadiatorDevice
+from .models import get_device_names
 
 
 _liste_etat: Dict[str, str] = {}
@@ -26,10 +24,7 @@ def get_all_radiator_names() -> List[str]:
     base = [name.strip() for name in MQTT_SETTINGS.devices if name.strip()]
     seen = {name for name in base}
 
-    try:
-        extras = list(RadiatorDevice.objects.values_list("name", flat=True))
-    except DatabaseError:
-        extras = []
+    extras = get_device_names()
 
     for extra in extras:
         if extra and extra not in seen:

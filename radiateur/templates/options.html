@@ -63,7 +63,7 @@
                                     <div class="text-muted small">IP&nbsp;: {{ device.ip_address }}</div>
                                 {% endif %}
                             </div>
-                            <span class="badge text-bg-light">Ajouté le {{ device.added_at|date:"d/m/Y H:i" }}</span>
+                            <span class="badge text-bg-light">Ajouté le {{ device.added_at_display }}</span>
                         </li>
                     {% endfor %}
                 </ul>
