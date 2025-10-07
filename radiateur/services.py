@@ -7,9 +7,12 @@ import json
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, Iterable
+from typing import Dict, Iterable, List
+
+from django.db import DatabaseError
 
 from .config import APP_LOG_FILE, MQTT_SETTINGS, TIMEZONE
+from .models import RadiatorDevice
 
 
 _liste_etat: Dict[str, str] = {}
@@ -17,10 +20,36 @@ _liste_etat: Dict[str, str] = {}
 OPTIONS_FILE_PATH = Path(__file__).resolve().parent / "templates" / "options.json"
 
 
+def get_all_radiator_names() -> List[str]:
+    """Return the union of configured and user-declared radiators."""
+
+    base = [name.strip() for name in MQTT_SETTINGS.devices if name.strip()]
+    seen = {name for name in base}
+
+    try:
+        extras = list(RadiatorDevice.objects.values_list("name", flat=True))
+    except DatabaseError:
+        extras = []
+
+    for extra in extras:
+        if extra and extra not in seen:
+            base.append(extra)
+            seen.add(extra)
+
+    return base
+
+
+def _ensure_state_entries() -> None:
+    """Ensure the shared state dictionary tracks every known radiator."""
+
+    for radiator in get_all_radiator_names():
+        _liste_etat.setdefault(radiator, "DEFAULT")
+
+
 def _default_disabled_states() -> Dict[str, bool]:
     """Return the default disabled state for each configured radiator."""
 
-    return {radiator: False for radiator in MQTT_SETTINGS.devices}
+    return {radiator: False for radiator in get_all_radiator_names()}
 
 
 def load_disabled_states() -> Dict[str, bool]:
@@ -81,6 +110,7 @@ def set_liste_etat(liste: Dict[str, str]) -> None:
 def get_liste_etat() -> Dict[str, str]:
     """Expose the current state of the radiators."""
 
+    _ensure_state_entries()
     return _liste_etat
 
 
@@ -103,7 +133,7 @@ def envoyer_changement_etat_mqtt(
     when a radiator has been deactivated from the options page.
     """
 
-    liste_radiateur = list(liste_radiateur or MQTT_SETTINGS.devices)
+    liste_radiateur = list(liste_radiateur or get_all_radiator_names())
     if not liste_radiateur:
         return {}
 
@@ -174,7 +204,7 @@ def boucle_demander_etat_appareil(
 ) -> None:
     """Continuously request device states at a fixed interval."""
 
-    liste_radiateur = list(liste_radiateur or MQTT_SETTINGS.devices)
+    liste_radiateur = list(liste_radiateur or get_all_radiator_names())
     if not mqtt_client:
         enregistrer_log("Aucun client MQTT disponible pour interroger les appareils")
         return
@@ -191,7 +221,7 @@ def demander_etat_au_appareil(mqtt_client, nb_try: int = 1, liste_radiateur: Ite
         enregistrer_log("Aucun client MQTT disponible pour demander l'état des appareils")
         return 0
 
-    liste_radiateur = list(liste_radiateur or MQTT_SETTINGS.devices)
+    liste_radiateur = list(liste_radiateur or get_all_radiator_names())
     enregistrer_log(
         f"Demande etat des appareils: {liste_radiateur} - Tentative : {nb_try}"
     )

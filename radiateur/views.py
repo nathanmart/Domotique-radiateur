@@ -6,6 +6,7 @@ import json
 import socket
 import time
 from datetime import datetime
+from ipaddress import ip_address
 from pathlib import Path
 
 from django.http import HttpResponse, JsonResponse
@@ -16,12 +17,16 @@ from django.views.decorators.csrf import csrf_exempt
 from typing import Optional
 
 from .config import MQTT_SETTINGS
+from .models import RadiatorDevice
 from .runtime import get_cached_states, get_mqtt_client
 from .services import (
     demander_etat_au_appareil,
     enregistrer_log,
     envoyer_changement_etat_mqtt,
+    get_all_radiator_names,
+    get_liste_etat,
     load_disabled_states,
+    save_disabled_states,
     update_disabled_state,
 )
 
@@ -177,16 +182,17 @@ def index(request):
     """Render the main dashboard page."""
 
     enregistrer_log("Requete page 'index'")
+    radiators = get_all_radiator_names()
     disabled_states = load_disabled_states()
     radiator_cards: list[tuple[str, bool]] = []
     has_active_radiators = False
-    for radiator in MQTT_SETTINGS.devices:
+    for radiator in radiators:
         is_disabled = disabled_states.get(radiator, False)
         if not is_disabled:
             has_active_radiators = True
         radiator_cards.append((radiator, is_disabled))
     context = {
-        "radiators": MQTT_SETTINGS.devices,
+        "radiators": radiators,
         "disabled_states": disabled_states,
         "radiator_cards": radiator_cards,
         "has_active_radiators": has_active_radiators,
@@ -231,8 +237,9 @@ def changement_etat(request):
         return HttpResponse(status=400)
 
     radiator = payload.get("radiator")
+    known_radiators = set(get_all_radiator_names())
     if radiator:
-        if radiator not in MQTT_SETTINGS.devices:
+        if radiator not in known_radiators:
             return HttpResponse(status=400)
         liste_radiateur: list[str] | None = [radiator]
     else:
@@ -270,7 +277,8 @@ def options(request):
             return HttpResponse(status=400)
 
         radiator = payload.get("radiator")
-        if not isinstance(radiator, str) or radiator not in MQTT_SETTINGS.devices:
+        known_radiators = set(get_all_radiator_names())
+        if not isinstance(radiator, str) or radiator not in known_radiators:
             return HttpResponse(status=400)
 
         disabled = bool(payload.get("disabled", False))
@@ -289,17 +297,89 @@ def options(request):
         return JsonResponse({"disabled": updated_map})
 
     enregistrer_log("Requete page 'options'")
+    radiators = get_all_radiator_names()
     disabled_states = load_disabled_states()
     context = {
-        "radiators": MQTT_SETTINGS.devices,
+        "radiators": radiators,
         "disabled_states": disabled_states,
         "radiator_options": [
             (radiator, disabled_states.get(radiator, False))
-            for radiator in MQTT_SETTINGS.devices
+            for radiator in radiators
         ],
         "mqtt_host": _detect_local_ip(MQTT_SETTINGS.host),
+        "custom_devices": list(RadiatorDevice.objects.order_by("name")),
     }
     return render(request, "options.html", context)
+
+
+@csrf_exempt
+@never_cache
+def devices(request):
+    """Register a new ESP8266 radiator from the local network."""
+
+    if request.method != "POST":
+        return HttpResponse(status=405)
+
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Requête invalide."}, status=400)
+
+    raw_name = payload.get("name")
+    if not isinstance(raw_name, str):
+        return JsonResponse({"error": "Le nom de l'appareil est requis."}, status=400)
+
+    name = raw_name.strip()
+    if not name:
+        return JsonResponse({"error": "Le nom de l'appareil est requis."}, status=400)
+    if len(name) > 64:
+        return JsonResponse({"error": "Le nom doit contenir 64 caractères maximum."}, status=400)
+
+    known_radiators = set(get_all_radiator_names())
+    if name in known_radiators:
+        return JsonResponse({"error": "Un appareil avec ce nom existe déjà."}, status=409)
+
+    raw_ip = payload.get("ip_address")
+    normalized_ip: Optional[str]
+    if raw_ip in (None, ""):
+        normalized_ip = None
+    elif isinstance(raw_ip, str):
+        try:
+            parsed_ip = ip_address(raw_ip.strip())
+        except ValueError:
+            return JsonResponse({"error": "Adresse IP invalide."}, status=400)
+
+        if not (parsed_ip.is_private or parsed_ip.is_link_local or parsed_ip.is_loopback):
+            return JsonResponse(
+                {"error": "L'adresse IP doit appartenir au réseau local."},
+                status=400,
+            )
+        normalized_ip = str(parsed_ip)
+    else:
+        return JsonResponse({"error": "Adresse IP invalide."}, status=400)
+
+    device = RadiatorDevice.objects.create(name=name, ip_address=normalized_ip)
+
+    states = load_disabled_states()
+    if name not in states:
+        states[name] = False
+        save_disabled_states(states)
+
+    state_map = get_liste_etat()
+    state_map.setdefault(name, "DEFAULT")
+
+    enregistrer_log(
+        f"Nouveau radiateur ajouté: {name}"
+        + (f" ({normalized_ip})" if normalized_ip else "")
+    )
+
+    return JsonResponse(
+        {
+            "name": device.name,
+            "ip_address": device.ip_address,
+        },
+        status=201,
+    )
 
 
 def _detect_local_ip(default: str) -> str:
