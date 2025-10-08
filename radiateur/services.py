@@ -153,6 +153,62 @@ def envoyer_changement_etat_mqtt(
     return applied_modes
 
 
+WEEKDAYS = (
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+)
+
+
+def _sanitize_schedule(payload: object) -> Dict[str, List[Dict[str, str]]]:
+    """Return a predictable structure from the raw JSON payload."""
+
+    schedule: Dict[str, List[Dict[str, str]]] = {day: [] for day in WEEKDAYS}
+    if not isinstance(payload, dict):
+        return schedule
+
+    for day, entries in payload.items():
+        if day not in schedule or not isinstance(entries, list):
+            continue
+
+        sanitized_entries: List[Dict[str, str]] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            start = entry.get("start")
+            end = entry.get("end")
+            if isinstance(start, str) and isinstance(end, str):
+                sanitized_entries.append({"start": start, "end": end})
+
+        schedule[day] = sanitized_entries
+
+    return schedule
+
+
+def _parse_slot(time_str: str, reference: datetime) -> datetime | None:
+    """Convert an HH:MM (or 24:00) string to an aware datetime."""
+
+    if time_str == "24:00":
+        base = reference.replace(hour=0, minute=0, second=0, microsecond=0)
+        return base + timedelta(days=1)
+
+    try:
+        parsed = datetime.strptime(time_str, "%H:%M")
+    except ValueError:
+        return None
+
+    return reference.replace(
+        hour=parsed.hour,
+        minute=parsed.minute,
+        second=0,
+        microsecond=0,
+    )
+
+
 def maj_etat_selon_planning(mqtt_client) -> None:
     """Update radiator states according to the planning definition."""
 
@@ -168,20 +224,33 @@ def maj_etat_selon_planning(mqtt_client) -> None:
     while True:
         heure_actuelle = datetime.now(TIMEZONE)
         if heure_actuelle.minute != last_minute.minute:
-            with open(planning_path, "r", encoding="utf-8") as file:
-                data = json.load(file)
+            try:
+                data = json.loads(planning_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                data = {}
 
-            for event in data:
-                start = datetime.strptime(event["start"], "%Y-%m-%dT%H:%M:%S").replace(second=0, microsecond=0)
-                end = datetime.strptime(event["end"], "%Y-%m-%dT%H:%M:%S").replace(second=0, microsecond=0)
-                start = TIMEZONE.localize(start)
-                end = TIMEZONE.localize(end)
+            schedule = _sanitize_schedule(data)
+            weekday = WEEKDAYS[heure_actuelle.weekday()]
+            entries = schedule.get(weekday, [])
 
-                current_time = datetime.now(TIMEZONE).replace(second=0, microsecond=0)
-                if end == current_time:
+            current_time = heure_actuelle.replace(second=0, microsecond=0)
+            for entry in entries:
+                start_time = _parse_slot(entry.get("start", ""), current_time)
+                end_time = _parse_slot(entry.get("end", ""), current_time)
+
+                if not start_time or not end_time:
+                    continue
+
+                # Convert the parsed timestamps to the configured timezone
+                if start_time.tzinfo is None:
+                    start_time = TIMEZONE.localize(start_time)
+                if end_time.tzinfo is None:
+                    end_time = TIMEZONE.localize(end_time)
+
+                if end_time == current_time:
                     enregistrer_log("Depuis planning --> ECO")
                     envoyer_changement_etat_mqtt("ECO", mqtt_client)
-                elif start == current_time:
+                elif start_time == current_time:
                     enregistrer_log("Depuis planning --> COMFORT")
                     envoyer_changement_etat_mqtt("COMFORT", mqtt_client)
 
