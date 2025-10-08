@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, List
@@ -97,23 +97,34 @@ def save_devices(devices: Iterable[RadiatorDevice]) -> None:
     """Persist the given device collection to disk."""
 
     DEVICES_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    serialized = [device.to_json() for device in devices]
+    ordered = sorted(devices, key=lambda device: device.name.lower())
+    serialized = [device.to_json() for device in ordered]
     DEVICES_FILE_PATH.write_text(
         json.dumps(serialized, ensure_ascii=False, indent=4), encoding="utf-8"
     )
 
 
-def add_device(name: str, ip_address: str | None) -> RadiatorDevice:
-    """Register a new device and return the resulting record."""
+def get_device(name: str) -> RadiatorDevice | None:
+    """Return the stored device matching ``name`` if available."""
 
-    devices = load_devices()
+    normalized = name.strip()
+    if not normalized:
+        return None
+
+    for device in load_devices():
+        if device.name == normalized:
+            return device
+    return None
+
+
+def record_discovered_device(
+    name: str, ip_address: str | None
+) -> tuple[RadiatorDevice, bool]:
+    """Register or update a device discovered on the local network."""
+
     normalized_name = name.strip()
     if not normalized_name:
         raise ValueError("Le nom de l'appareil est requis.")
-
-    for existing in devices:
-        if existing.name == normalized_name:
-            raise ValueError("Un appareil avec ce nom existe déjà.")
 
     sanitized_ip: str | None
     if isinstance(ip_address, str):
@@ -121,15 +132,71 @@ def add_device(name: str, ip_address: str | None) -> RadiatorDevice:
     else:
         sanitized_ip = None
 
+    devices = load_devices()
+    for index, existing in enumerate(devices):
+        if existing.name == normalized_name:
+            updated = replace(existing, ip_address=sanitized_ip)
+            devices[index] = updated
+            save_devices(devices)
+            return updated, False
+
     record = RadiatorDevice(
         name=normalized_name,
         ip_address=sanitized_ip,
         added_at=datetime.now(TIMEZONE),
     )
-
     devices.append(record)
     save_devices(devices)
-    return record
+    return record, True
+
+
+def rename_device(old_name: str, new_name: str) -> RadiatorDevice:
+    """Rename an existing device and return the updated record."""
+
+    normalized_old = old_name.strip()
+    normalized_new = new_name.strip()
+    if not normalized_old:
+        raise ValueError("L'ancien nom est invalide.")
+    if not normalized_new:
+        raise ValueError("Le nouveau nom est requis.")
+
+    devices = load_devices()
+    for device in devices:
+        if device.name == normalized_new and device.name != normalized_old:
+            raise ValueError("Un appareil avec ce nom existe déjà.")
+
+    updated_device: RadiatorDevice | None = None
+    for index, device in enumerate(devices):
+        if device.name == normalized_old:
+            updated_device = RadiatorDevice(
+                name=normalized_new,
+                ip_address=device.ip_address,
+                added_at=device.added_at,
+            )
+            devices[index] = updated_device
+            break
+
+    if updated_device is None:
+        raise KeyError(normalized_old)
+
+    save_devices(devices)
+    return updated_device
+
+
+def remove_device(name: str) -> bool:
+    """Delete the device with the given name. Return ``True`` if removed."""
+
+    normalized = name.strip()
+    if not normalized:
+        return False
+
+    devices = load_devices()
+    filtered = [device for device in devices if device.name != normalized]
+    if len(filtered) == len(devices):
+        return False
+
+    save_devices(filtered)
+    return True
 
 
 def get_device_names() -> List[str]:

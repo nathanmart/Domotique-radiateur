@@ -8,11 +8,10 @@ Ce firmware transforme l'ESP8266 en radiateur connecté piloté via MQTT. Il com
 2. **Portail captif** : dès qu'un appareil se connecte à ce Wi-Fi, un portail de connexion s'ouvre automatiquement (comme sur les hotspots publics). À défaut, l'interface reste accessible via `http://192.168.4.1/`. Le formulaire permet de saisir :
    - le SSID du réseau Wi-Fi à rejoindre ;
    - le mot de passe correspondant (facultatif si le Wi-Fi est ouvert) ;
-   - l'adresse IP du serveur MQTT que l'appareil doit contacter.
-3. **Enregistrement** : après validation, les informations sont stockées dans l'EEPROM (`DeviceConfig`). Elles sont automatiquement réutilisées aux démarrages suivants.
-4. **Tentative de connexion** : le module coupe son point d'accès et tente de rejoindre le Wi-Fi saisi. Une fois le Wi-Fi opérationnel, le client MQTT est configuré avec l'IP fournie.
-
-Si aucune configuration n'est présente, un serveur par défaut `192.168.1.151` est utilisé jusqu'à ce qu'une valeur soit fournie via l'interface.
+   - l'adresse IP du serveur MQTT que l'appareil doit contacter ;
+   - le **nom de l'appareil**, qui sert d'identifiant MQTT.
+3. **Enregistrement** : après validation, les informations sont stockées dans l'EEPROM (`DeviceConfig`). Elles sont automatiquement réutilisées aux démarrages suivants. Si aucun nom n'est fourni (ancien firmware), un identifiant de secours `RADIATEUR-XXXXXX` basé sur l'ID du module est généré et mémorisé.
+4. **Tentative de connexion** : le module coupe son point d'accès et tente de rejoindre le Wi-Fi saisi. Une fois le Wi-Fi opérationnel, le client MQTT est configuré avec l'IP fournie et l'identifiant choisi.
 
 ## Fonctionnement réseau quotidien
 
@@ -21,10 +20,17 @@ Si aucune configuration n'est présente, un serveur par défaut `192.168.1.151` 
 
 ## Pilotage par MQTT
 
-- Le client s'abonne au topic `test` avec l'identifiant `Chambre`.
+- Le client s'abonne au topic `test` avec l'identifiant issu du portail (champ *Nom de l'appareil*).
 - Lorsqu'un message JSON est reçu, les champs `FROM`, `TO` et `COMMAND` sont vérifiés.
-- Si le message provient de `Django` et est destiné à `Chambre`, la commande associée déclenche les fonctions : `modeComfort`, `modeEco`, `modeOff`, `modeHorsGel`, `clignoter` ou `checkEtat`.
+- Si le message provient de `Django` et est destiné à ce nom, la commande associée déclenche les fonctions : `modeComfort`, `modeEco`, `modeOff`, `modeHorsGel`, `clignoter` ou `checkEtat`.
 - `checkEtat` publie l'état courant sur le même topic au format JSON.
+
+## Détection et administration depuis Django
+
+- L'ESP8266 expose une route HTTP `GET /identify` qui renvoie un JSON avec son nom, son adresse IP locale et son adresse MAC. Le serveur Django balaie régulièrement le réseau local via cette route lorsqu'on demande l'ajout d'appareils.
+- Une fois détecté, l'appareil est ajouté automatiquement dans `devices.json`. Les noms et IP sont affichés sur la page Options.
+- La route `POST /device-name` permet de renommer l'appareil à distance ; le serveur Django l'utilise lorsqu'un renommage est effectué depuis l'interface. Le firmware met alors à jour l'EEPROM et se reconnecte au broker avec le nouvel identifiant.
+- La page Options offre aussi la possibilité de supprimer un radiateur du registre JSON côté serveur.
 
 ## Reconfigurer le Wi-Fi ou le serveur MQTT
 
@@ -37,4 +43,4 @@ Pour changer de Wi-Fi, de mot de passe ou d'adresse de broker :
 3. **Validation** : après enregistrement, l'ESP8266 tente immédiatement de rejoindre le nouveau réseau et, si la connexion aboutit, se connecte au broker MQTT à l'adresse indiquée.
 4. **Retour au service** : une fois la liaison établie, le point d'accès de configuration est coupé. Les nouvelles valeurs sont mémorisées pour les démarrages futurs.
 
-Cette procédure peut être répétée autant de fois que nécessaire lors d'un déménagement ou d'une modification de la configuration réseau.
+Cette procédure peut être répétée autant de fois que nécessaire lors d'un déménagement ou d'une modification de la configuration réseau. Pour renommer l'appareil, il suffit d'utiliser le bouton « Renommer » de la page Options : Django met à jour l'ESP8266 via HTTP puis remplace l'entrée correspondante dans `devices.json`.

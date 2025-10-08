@@ -139,7 +139,7 @@ MQTT_BROKER_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
 MQTT_TOPIC = os.getenv("MQTT_TOPIC", "test")
 MQTT_DEVICES = [
     device.strip()
-    for device in os.getenv("MQTT_DEVICES", "Cuisine,Chambre").split(",")
+    for device in os.getenv("MQTT_DEVICES", "").split(",")
     if device.strip()
 ]
 MQTT_BROKER_START_COMMAND = os.getenv("MQTT_BROKER_START_COMMAND")
