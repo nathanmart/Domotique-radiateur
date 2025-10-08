@@ -43,6 +43,65 @@ unsigned long lastReconnectAttempt = 0;
 bool apActive = false;
 char mqttClientId[DEVICE_NAME_MAX_LENGTH];
 
+enum LedPatternId : uint8_t {
+  LED_PATTERN_WIFI_CONNECTING = 0,
+  LED_PATTERN_WAITING_FOR_SERVER,
+  LED_PATTERN_WAITING_FOR_MQTT,
+  LED_PATTERN_ONLINE,
+};
+
+struct BlinkStep {
+  bool ledOn;
+  uint16_t durationMs;
+};
+
+struct LedPatternDefinition {
+  const BlinkStep* steps;
+  size_t length;
+};
+
+const bool LED_ACTIVE_STATE = LOW;
+const bool LED_INACTIVE_STATE = HIGH;
+
+const BlinkStep LED_PATTERN_WIFI_CONNECTING_STEPS[] = {
+  {true, 150},
+  {false, 150},
+};
+
+const BlinkStep LED_PATTERN_WAITING_FOR_SERVER_STEPS[] = {
+  {true, 200},
+  {false, 200},
+  {true, 200},
+  {false, 800},
+};
+
+const BlinkStep LED_PATTERN_WAITING_FOR_MQTT_STEPS[] = {
+  {true, 200},
+  {false, 200},
+  {true, 200},
+  {false, 200},
+  {true, 200},
+  {false, 800},
+};
+
+const BlinkStep LED_PATTERN_ONLINE_STEPS[] = {
+  {true, 60},
+  {false, 2940},
+};
+
+const LedPatternDefinition LED_PATTERNS[] = {
+  {LED_PATTERN_WIFI_CONNECTING_STEPS, sizeof(LED_PATTERN_WIFI_CONNECTING_STEPS) / sizeof(BlinkStep)},
+  {LED_PATTERN_WAITING_FOR_SERVER_STEPS, sizeof(LED_PATTERN_WAITING_FOR_SERVER_STEPS) / sizeof(BlinkStep)},
+  {LED_PATTERN_WAITING_FOR_MQTT_STEPS, sizeof(LED_PATTERN_WAITING_FOR_MQTT_STEPS) / sizeof(BlinkStep)},
+  {LED_PATTERN_ONLINE_STEPS, sizeof(LED_PATTERN_ONLINE_STEPS) / sizeof(BlinkStep)},
+};
+
+LedPatternId currentLedPattern = LED_PATTERN_WIFI_CONNECTING;
+size_t currentLedStep = 0;
+unsigned long currentLedStepStarted = 0;
+bool ledPatternInitialised = false;
+bool statusLedSuspended = false;
+
 void startAccessPoint();
 void stopAccessPoint();
 void setupServer();
@@ -60,6 +119,78 @@ bool ensureDeviceName();
 void refreshMqttClientId();
 bool isMqttConfigured();
 void configureMqttClient();
+void updateStatusLed();
+void setStatusLedPattern(LedPatternId pattern);
+void suspendStatusLed(bool suspend);
+
+void applyLedState(bool on) {
+  digitalWrite(LED_BUILTIN, on ? LED_ACTIVE_STATE : LED_INACTIVE_STATE);
+}
+
+void resetLedPatternState() {
+  const LedPatternDefinition& pattern = LED_PATTERNS[currentLedPattern];
+  currentLedStep = 0;
+  currentLedStepStarted = millis();
+  ledPatternInitialised = true;
+  if (pattern.length > 0) {
+    applyLedState(pattern.steps[0].ledOn);
+  }
+}
+
+void setStatusLedPattern(LedPatternId pattern) {
+  if (currentLedPattern == pattern && ledPatternInitialised && !statusLedSuspended) {
+    return;
+  }
+  currentLedPattern = pattern;
+  ledPatternInitialised = false;
+}
+
+void suspendStatusLed(bool suspend) {
+  statusLedSuspended = suspend;
+  if (!suspend) {
+    ledPatternInitialised = false;
+  }
+}
+
+void advanceStatusLed() {
+  if (statusLedSuspended) {
+    return;
+  }
+  if (!ledPatternInitialised) {
+    resetLedPatternState();
+  }
+  const LedPatternDefinition& pattern = LED_PATTERNS[currentLedPattern];
+  if (pattern.length == 0) {
+    return;
+  }
+  unsigned long now = millis();
+  const BlinkStep* steps = pattern.steps;
+  const BlinkStep& step = steps[currentLedStep];
+  if (now - currentLedStepStarted >= step.durationMs) {
+    currentLedStep = (currentLedStep + 1) % pattern.length;
+    currentLedStepStarted = now;
+    applyLedState(steps[currentLedStep].ledOn);
+  }
+}
+
+void updateStatusLed() {
+  if (statusLedSuspended) {
+    return;
+  }
+  LedPatternId desiredPattern = LED_PATTERN_WIFI_CONNECTING;
+  if (WiFi.status() != WL_CONNECTED) {
+    desiredPattern = LED_PATTERN_WIFI_CONNECTING;
+  } else if (!isMqttConfigured()) {
+    desiredPattern = LED_PATTERN_WAITING_FOR_SERVER;
+  } else if (!client.connected()) {
+    desiredPattern = LED_PATTERN_WAITING_FOR_MQTT;
+  } else {
+    desiredPattern = LED_PATTERN_ONLINE;
+  }
+
+  setStatusLedPattern(desiredPattern);
+  advanceStatusLed();
+}
 
 void setup() {
   // Serial.begin(115200);
@@ -80,7 +211,13 @@ void setup() {
   digitalWrite(pinHigh, LOW);
   digitalWrite(pinLow, LOW);
 
+  setStatusLedPattern(LED_PATTERN_WIFI_CONNECTING);
+  updateStatusLed();
+
+  suspendStatusLed(true);
   clignoter(3000, 500);
+  suspendStatusLed(false);
+  updateStatusLed();
 
   WiFi.mode(WIFI_AP_STA);
   startAccessPoint();
@@ -93,6 +230,8 @@ void setup() {
 }
 
 void loop() {
+  updateStatusLed();
+
   server.handleClient();
 
   if (apActive) {
@@ -108,6 +247,7 @@ void loop() {
       lastReconnectAttempt = now;
       connectToSavedWifi();
     }
+    updateStatusLed();
     return;
   }
 
@@ -127,6 +267,8 @@ void loop() {
     String input = Serial.readStringUntil('\n');
     publishMessage(input);
   }
+
+  updateStatusLed();
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
@@ -191,7 +333,7 @@ void reconnect() {
   }
   while (!client.connected()) {
     // Serial.print("Tentative de connexion au serveur MQTT...");
-    
+
     if (client.connect(mqttClientId)) {
       // Serial.println("Connecté au serveur MQTT");
       client.subscribe(mqtt_topic);
@@ -201,6 +343,7 @@ void reconnect() {
       // Serial.println(" Réessayez dans 5 secondes.");
       delay(5000);
     }
+    updateStatusLed();
   }
 }
 
@@ -350,10 +493,12 @@ bool connectToSavedWifi(bool blocking) {
   unsigned long startAttempt = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 15000) {
     delay(500);
+    updateStatusLed();
   }
 
   if (WiFi.status() == WL_CONNECTED) {
     stopAccessPoint();
+    updateStatusLed();
     return true;
   }
 
@@ -439,6 +584,8 @@ void handleDeviceName() {
     reconnect();
   }
 
+  updateStatusLed();
+
   StaticJsonDocument<96> response;
   response["status"] = "ok";
   response["name"] = deviceConfig.deviceName;
@@ -503,6 +650,8 @@ void handleMqttHost() {
       reconnect();
     }
   }
+
+  updateStatusLed();
 }
 
 void handleNotFound() {
@@ -514,6 +663,7 @@ void handleNotFound() {
 }
 
 void clignoter(int totalDuration, int blinkSpeed) {
+  suspendStatusLed(true);
   int numberOfBlinks = totalDuration / (2 * blinkSpeed);
   for (int i = 0; i < numberOfBlinks; i++) {
     digitalWrite(LED_BUILTIN, LOW);
@@ -521,6 +671,8 @@ void clignoter(int totalDuration, int blinkSpeed) {
     digitalWrite(LED_BUILTIN, HIGH);
     delay(blinkSpeed);
   }
+  suspendStatusLed(false);
+  updateStatusLed();
 }
 
 void modeComfort(){
