@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import json
+import socket
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+from ipaddress import ip_address, ip_network
+import http.client
 from pathlib import Path
 
 from django.http import HttpResponse, JsonResponse
@@ -12,13 +16,25 @@ from django.shortcuts import render
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt
 
-from .config import MQTT_SETTINGS
+from typing import Optional
+
+from .config import MQTT_SETTINGS, TIMEZONE
+from .models import (
+    get_device,
+    load_devices,
+    record_discovered_device,
+    remove_device,
+    rename_device,
+)
 from .runtime import get_cached_states, get_mqtt_client
 from .services import (
     demander_etat_au_appareil,
     enregistrer_log,
     envoyer_changement_etat_mqtt,
+    get_all_radiator_names,
+    get_liste_etat,
     load_disabled_states,
+    save_disabled_states,
     update_disabled_state,
 )
 
@@ -174,16 +190,17 @@ def index(request):
     """Render the main dashboard page."""
 
     enregistrer_log("Requete page 'index'")
+    radiators = get_all_radiator_names()
     disabled_states = load_disabled_states()
     radiator_cards: list[tuple[str, bool]] = []
     has_active_radiators = False
-    for radiator in MQTT_SETTINGS.devices:
+    for radiator in radiators:
         is_disabled = disabled_states.get(radiator, False)
         if not is_disabled:
             has_active_radiators = True
         radiator_cards.append((radiator, is_disabled))
     context = {
-        "radiators": MQTT_SETTINGS.devices,
+        "radiators": radiators,
         "disabled_states": disabled_states,
         "radiator_cards": radiator_cards,
         "has_active_radiators": has_active_radiators,
@@ -228,8 +245,9 @@ def changement_etat(request):
         return HttpResponse(status=400)
 
     radiator = payload.get("radiator")
+    known_radiators = set(get_all_radiator_names())
     if radiator:
-        if radiator not in MQTT_SETTINGS.devices:
+        if radiator not in known_radiators:
             return HttpResponse(status=400)
         liste_radiateur: list[str] | None = [radiator]
     else:
@@ -267,7 +285,8 @@ def options(request):
             return HttpResponse(status=400)
 
         radiator = payload.get("radiator")
-        if not isinstance(radiator, str) or radiator not in MQTT_SETTINGS.devices:
+        known_radiators = set(get_all_radiator_names())
+        if not isinstance(radiator, str) or radiator not in known_radiators:
             return HttpResponse(status=400)
 
         disabled = bool(payload.get("disabled", False))
@@ -286,13 +305,402 @@ def options(request):
         return JsonResponse({"disabled": updated_map})
 
     enregistrer_log("Requete page 'options'")
+    radiators = get_all_radiator_names()
     disabled_states = load_disabled_states()
     context = {
-        "radiators": MQTT_SETTINGS.devices,
+        "radiators": radiators,
         "disabled_states": disabled_states,
         "radiator_options": [
             (radiator, disabled_states.get(radiator, False))
-            for radiator in MQTT_SETTINGS.devices
+            for radiator in radiators
+        ],
+        "mqtt_host": _detect_local_ip(MQTT_SETTINGS.host),
+        "custom_devices": [
+            {
+                "name": device.name,
+                "ip_address": device.ip_address,
+                "added_at_display": device.added_at.astimezone(TIMEZONE).strftime(
+                    "%d/%m/%Y %H:%M"
+                ),
+            }
+            for device in load_devices()
         ],
     }
     return render(request, "options.html", context)
+
+
+ESP_DISCOVERY_ENDPOINT = "/identify"
+ESP_RENAME_ENDPOINT = "/device-name"
+ESP_MQTT_HOST_ENDPOINT = "/mqtt-host"
+ESP_DISCOVERY_TIMEOUT = 1.5
+ESP_DISCOVERY_SIGNATURE = "esp8266-radiator"
+ESP_SCAN_MAX_WORKERS = 24
+
+
+def _enumerate_local_hosts() -> list[str]:
+    """Return the IPv4 hosts belonging to the local /24 network."""
+
+    local_ip = _detect_local_ip(MQTT_SETTINGS.host)
+    try:
+        parsed = ip_address(local_ip)
+    except ValueError:
+        return []
+
+    if parsed.version != 4 or parsed.is_loopback or parsed.is_unspecified:
+        return []
+
+    try:
+        network = ip_network(f"{local_ip}/24", strict=False)
+    except ValueError:
+        return []
+
+    hosts: list[str] = []
+    for host in network.hosts():
+        if str(host) != local_ip:
+            hosts.append(str(host))
+    return hosts
+
+
+def _probe_esp8266(host: str) -> dict[str, str] | None:
+    """Attempt to retrieve identification information from an ESP8266."""
+
+    connection: http.client.HTTPConnection | None = None
+    try:
+        connection = http.client.HTTPConnection(host, timeout=ESP_DISCOVERY_TIMEOUT)
+        connection.request("GET", ESP_DISCOVERY_ENDPOINT)
+        response = connection.getresponse()
+        if response.status != 200:
+            return None
+        payload = response.read()
+    except (OSError, http.client.HTTPException):
+        return None
+    finally:
+        if connection is not None:
+            try:
+                connection.close()
+            except OSError:
+                pass
+
+    try:
+        data = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+
+    if not isinstance(data, dict):
+        return None
+    if data.get("device_type") != ESP_DISCOVERY_SIGNATURE:
+        return None
+
+    raw_name = data.get("name")
+    if not isinstance(raw_name, str):
+        return None
+    name = raw_name.strip()
+    if not name:
+        return None
+
+    ip_value = data.get("ip_address")
+    ip_str = str(ip_value).strip() if isinstance(ip_value, str) else host
+
+    return {
+        "name": name,
+        "ip_address": ip_str,
+        "mac_address": data.get("mac_address"),
+    }
+
+
+def _discover_esp8266_devices(hosts: list[str] | None = None) -> list[dict[str, str]]:
+    """Scan the local network and return every responding ESP8266."""
+
+    hosts = hosts if hosts is not None else _enumerate_local_hosts()
+    if not hosts:
+        return []
+
+    results: list[dict[str, str]] = []
+    workers = min(len(hosts), ESP_SCAN_MAX_WORKERS) or 1
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {executor.submit(_probe_esp8266, host): host for host in hosts}
+        for future in as_completed(futures):
+            info = future.result()
+            if info is not None:
+                results.append(info)
+
+    return results
+
+
+def _push_device_name(ip: str, name: str) -> bool:
+    """Request the ESP8266 to update its device name."""
+
+    payload = json.dumps({"name": name})
+    connection: http.client.HTTPConnection | None = None
+    try:
+        connection = http.client.HTTPConnection(ip, timeout=ESP_DISCOVERY_TIMEOUT)
+        connection.request(
+            "POST",
+            ESP_RENAME_ENDPOINT,
+            body=payload.encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        response = connection.getresponse()
+        if response.status != 200:
+            return False
+        raw = response.read()
+    except (OSError, http.client.HTTPException):
+        return False
+    finally:
+        if connection is not None:
+            try:
+                connection.close()
+            except OSError:
+                pass
+
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return False
+
+    return isinstance(data, dict) and data.get("status") == "ok"
+
+
+def _push_mqtt_host(ip: str, host: str) -> bool:
+    """Send the MQTT broker address to the ESP8266."""
+
+    payload = json.dumps({"host": host})
+    connection: http.client.HTTPConnection | None = None
+    try:
+        connection = http.client.HTTPConnection(ip, timeout=ESP_DISCOVERY_TIMEOUT)
+        connection.request(
+            "POST",
+            ESP_MQTT_HOST_ENDPOINT,
+            body=payload.encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        response = connection.getresponse()
+        if response.status != 200:
+            return False
+        raw = response.read()
+    except (OSError, http.client.HTTPException):
+        return False
+    finally:
+        if connection is not None:
+            try:
+                connection.close()
+            except OSError:
+                pass
+
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return False
+
+    return isinstance(data, dict) and data.get("status") == "ok"
+
+
+@csrf_exempt
+@never_cache
+def devices(request):
+    """Manage ESP8266 registrations via the JSON registry."""
+
+    if request.method == "POST":
+        mqtt_host = _detect_local_ip(MQTT_SETTINGS.host)
+        hosts = _enumerate_local_hosts()
+        if not hosts:
+            return JsonResponse(
+                {
+                    "error": "Impossible de déterminer l'adresse IP locale pour scanner le réseau.",
+                },
+                status=503,
+            )
+
+        enregistrer_log("Recherche d'appareils ESP8266 sur le réseau local")
+        discovered = _discover_esp8266_devices(hosts)
+
+        added: list[dict[str, str | None]] = []
+        existing: list[dict[str, str | None]] = []
+        configured: list[str] = []
+        seen: set[str] = set()
+
+        state_map = get_liste_etat()
+        disabled_states = load_disabled_states()
+        states_changed = False
+
+        for info in discovered:
+            name = info["name"]
+            if name in seen:
+                continue
+            seen.add(name)
+
+            try:
+                record, created = record_discovered_device(name, info.get("ip_address"))
+            except ValueError:
+                continue
+
+            assigned_host: str | None = None
+            if record.ip_address and mqtt_host:
+                if _push_mqtt_host(record.ip_address, mqtt_host):
+                    assigned_host = mqtt_host
+                    configured.append(record.name)
+                else:
+                    enregistrer_log(
+                        "Impossible de configurer le broker MQTT pour %s (%s)",
+                        record.name,
+                        record.ip_address,
+                    )
+
+            entry = {
+                "name": record.name,
+                "ip_address": record.ip_address,
+                "added_at": record.added_at.isoformat(),
+                "mqtt_host": assigned_host,
+            }
+
+            if created:
+                added.append(entry)
+                if record.name not in state_map:
+                    state_map[record.name] = "DEFAULT"
+                if disabled_states.get(record.name) is None:
+                    disabled_states[record.name] = False
+                    states_changed = True
+                enregistrer_log(
+                    "Nouveau radiateur détecté: %s%s"
+                    % (
+                        record.name,
+                        f" ({record.ip_address})" if record.ip_address else "",
+                    )
+                )
+            else:
+                existing.append(entry)
+
+        if states_changed:
+            save_disabled_states(disabled_states)
+
+        payload = {
+            "added": added,
+            "existing": existing,
+            "detected": len(discovered),
+            "configured": configured,
+        }
+        return JsonResponse(payload)
+
+    if request.method == "PATCH":
+        try:
+            payload = json.loads(request.body.decode("utf-8"))
+        except json.JSONDecodeError:
+            return JsonResponse({"error": "Requête invalide."}, status=400)
+
+        raw_old = payload.get("old_name")
+        raw_new = payload.get("new_name")
+        if not isinstance(raw_old, str) or not isinstance(raw_new, str):
+            return JsonResponse({"error": "Noms invalides."}, status=400)
+
+        old_name = raw_old.strip()
+        new_name = raw_new.strip()
+        if not old_name or not new_name:
+            return JsonResponse({"error": "Les noms fournis sont invalides."}, status=400)
+        if len(new_name) > 63:
+            return JsonResponse({"error": "Le nouveau nom est trop long."}, status=400)
+
+        if old_name == new_name:
+            return JsonResponse({"name": old_name})
+
+        record = get_device(old_name)
+        if record is None:
+            return JsonResponse({"error": "Appareil introuvable."}, status=404)
+
+        if not record.ip_address:
+            return JsonResponse(
+                {
+                    "error": "Adresse IP inconnue pour contacter l'appareil. Relancez une détection avant de le renommer.",
+                },
+                status=409,
+            )
+
+        existing_device = get_device(new_name)
+        if existing_device is not None and existing_device.name != old_name:
+            return JsonResponse({"error": "Un appareil avec ce nom existe déjà."}, status=409)
+
+        if not _push_device_name(record.ip_address, new_name):
+            return JsonResponse(
+                {"error": "Impossible de contacter l'appareil pour mettre à jour son nom."},
+                status=502,
+            )
+
+        try:
+            updated = rename_device(old_name, new_name)
+        except ValueError as exc:
+            return JsonResponse({"error": str(exc)}, status=409)
+        except KeyError:
+            return JsonResponse({"error": "Appareil introuvable."}, status=404)
+
+        state_map = get_liste_etat()
+        if old_name in state_map:
+            state_map[new_name] = state_map.pop(old_name)
+        else:
+            state_map.setdefault(new_name, "DEFAULT")
+
+        states = load_disabled_states()
+        previous_state = states.pop(old_name, False)
+        states[new_name] = previous_state
+        save_disabled_states(states)
+
+        enregistrer_log(f"Radiateur renommé: {old_name} -> {new_name}")
+
+        return JsonResponse(
+            {
+                "name": updated.name,
+                "ip_address": updated.ip_address,
+            }
+        )
+
+    if request.method == "DELETE":
+        try:
+            payload = json.loads(request.body.decode("utf-8"))
+        except json.JSONDecodeError:
+            return JsonResponse({"error": "Requête invalide."}, status=400)
+
+        raw_name = payload.get("name")
+        if not isinstance(raw_name, str):
+            return JsonResponse({"error": "Nom invalide."}, status=400)
+
+        name = raw_name.strip()
+        if not name:
+            return JsonResponse({"error": "Nom invalide."}, status=400)
+
+        if not remove_device(name):
+            return JsonResponse({"error": "Appareil introuvable."}, status=404)
+
+        state_map = get_liste_etat()
+        state_map.pop(name, None)
+
+        states = load_disabled_states()
+        if name in states:
+            del states[name]
+        save_disabled_states(states)
+
+        enregistrer_log(f"Radiateur supprimé: {name}")
+
+        return JsonResponse({"deleted": name})
+
+    return HttpResponse(status=405)
+
+
+def _detect_local_ip(default: str) -> str:
+    """Return the best local IPv4 address for the MQTT broker."""
+
+    candidate: Optional[str] = None
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))
+            candidate = sock.getsockname()[0]
+    except OSError:
+        candidate = None
+
+    if not candidate or candidate.startswith("127."):
+        try:
+            hostname_ip = socket.gethostbyname(socket.gethostname())
+        except OSError:
+            hostname_ip = ""
+        if hostname_ip and not hostname_ip.startswith("127."):
+            candidate = hostname_ip
+
+    return candidate or default

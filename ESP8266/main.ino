@@ -1,15 +1,30 @@
 #include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
+#include <EEPROM.h>
+#include <DNSServer.h>
+#include <cstring>
 
 
 #define LED_BUILTIN 2
 
-const char* ssid = "Bbox-1A72D098";
-const char* password = "N2vGETVJ93ueSXseMX";
-const char* mqtt_server = "192.168.1.151";
+const uint16_t mqtt_port = 1883;
 const char* mqtt_topic = "test";
-const char* mqtt_client_id = "Chambre"; 
+
+const size_t DEVICE_NAME_MAX_LENGTH = 64;
+
+const char* ap_ssid = "Radiateur-Setup";
+const int EEPROM_SIZE = 256;
+const int RECONNECT_INTERVAL = 10000; // 10 secondes
+const byte DNS_PORT = 53;
+
+struct DeviceConfig {
+  char ssid[32];
+  char password[64];
+  char mqttServer[64];
+  char deviceName[DEVICE_NAME_MAX_LENGTH];
+};
 
 
 
@@ -19,10 +34,44 @@ const int pinLow = 12;
 
 WiFiClient espClient;
 PubSubClient client(espClient);
+ESP8266WebServer server(80);
+DNSServer dnsServer;
+
+DeviceConfig deviceConfig;
+bool credentialsLoaded = false;
+unsigned long lastReconnectAttempt = 0;
+bool apActive = false;
+char mqttClientId[DEVICE_NAME_MAX_LENGTH];
+
+void startAccessPoint();
+void stopAccessPoint();
+void setupServer();
+void handleRoot();
+void handleSave();
+void handleNotFound();
+bool handleCaptivePortal();
+void handleIdentify();
+void handleDeviceName();
+void handleMqttHost();
+bool loadConfig();
+void saveConfig(const DeviceConfig &data);
+bool connectToSavedWifi(bool blocking = false);
+bool ensureDeviceName();
+void refreshMqttClientId();
+bool isMqttConfigured();
+void configureMqttClient();
 
 void setup() {
   // Serial.begin(115200);
   // delay(10);
+
+  EEPROM.begin(EEPROM_SIZE);
+  credentialsLoaded = loadConfig();
+  bool nameAssigned = ensureDeviceName();
+  refreshMqttClientId();
+  if (nameAssigned) {
+    saveConfig(deviceConfig);
+  }
 
   pinMode(pinHigh, OUTPUT);
   pinMode(pinLow, OUTPUT);
@@ -30,31 +79,48 @@ void setup() {
 
   digitalWrite(pinHigh, LOW);
   digitalWrite(pinLow, LOW);
-  
+
   clignoter(3000, 500);
 
-  // Connexion au réseau Wi-Fi
-  // Serial.println();
-  // Serial.print("Connexion au réseau Wi-Fi ");
-  // Serial.println(ssid);
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    // Serial.print(".");
-  }
-  // Serial.println();
-  // Serial.println("Connecté au réseau Wi-Fi");
-  
-  // Configuration du client MQTT
-  client.setServer(mqtt_server, 1883);
+  WiFi.mode(WIFI_AP_STA);
+  startAccessPoint();
+  setupServer();
+
+  connectToSavedWifi(true);
+
+  configureMqttClient();
   client.setCallback(callback);
 }
 
 void loop() {
-  if (!client.connected()) {
-    reconnect();
+  server.handleClient();
+
+  if (apActive) {
+    dnsServer.processNextRequest();
   }
-  client.loop();
+
+  if (WiFi.status() != WL_CONNECTED) {
+    if (!apActive) {
+      startAccessPoint();
+    }
+    unsigned long now = millis();
+    if (credentialsLoaded && now - lastReconnectAttempt > RECONNECT_INTERVAL) {
+      lastReconnectAttempt = now;
+      connectToSavedWifi();
+    }
+    return;
+  }
+
+  if (apActive) {
+    stopAccessPoint();
+  }
+
+  if (isMqttConfigured()) {
+    if (!client.connected()) {
+      reconnect();
+    }
+    client.loop();
+  }
 
   // Lecture de l'entrée série et publication de messages MQTT
   if (Serial.available()) {
@@ -94,7 +160,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
   const String to = doc["TO"];
   const String command = doc["COMMAND"];
   
-  if(from=="Django" && to==mqtt_client_id){
+  if(from=="Django" && to==mqttClientId){
       if (command == "CLIGNOTER") clignoter(2000, 500);
       else if (command == "COMFORT") modeComfort();
       else if (command == "ECO") modeEco();
@@ -120,10 +186,13 @@ void publishMessage(String message) {
 }
 
 void reconnect() {
+  if (!isMqttConfigured()) {
+    return;
+  }
   while (!client.connected()) {
     // Serial.print("Tentative de connexion au serveur MQTT...");
     
-    if (client.connect(mqtt_client_id)) {
+    if (client.connect(mqttClientId)) {
       // Serial.println("Connecté au serveur MQTT");
       client.subscribe(mqtt_topic);
     } else {
@@ -133,6 +202,315 @@ void reconnect() {
       delay(5000);
     }
   }
+}
+
+void startAccessPoint() {
+  WiFi.softAP(ap_ssid);
+  IPAddress apIP = WiFi.softAPIP();
+  dnsServer.start(DNS_PORT, "*", apIP);
+  apActive = true;
+}
+
+void setupServer() {
+  server.on("/", HTTP_GET, handleRoot);
+  server.on("/save", HTTP_POST, handleSave);
+  server.on("/identify", HTTP_GET, handleIdentify);
+  server.on("/device-name", HTTP_POST, handleDeviceName);
+  server.on("/mqtt-host", HTTP_POST, handleMqttHost);
+  server.onNotFound(handleNotFound);
+  server.begin();
+}
+
+void handleRoot() {
+  if (handleCaptivePortal()) {
+    return;
+  }
+
+  String page = "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Configuration WiFi</title></head><body>";
+  page += "<h1>Configuration du WiFi</h1>";
+  page += "<p>Statut actuel : ";
+  if (WiFi.status() == WL_CONNECTED) {
+    page += "connecté à " + WiFi.SSID();
+  } else {
+    page += "non connecté";
+  }
+  page += "</p>";
+  page += "<form method='POST' action='/save'>";
+  page += "<label>SSID : <input name='ssid' value='";
+  if (credentialsLoaded) {
+    page += deviceConfig.ssid;
+  }
+  page += "' required></label><br><br>";
+  page += "<label>Mot de passe : <input name='password' type='password' placeholder='Mot de passe WiFi'></label><br><br>";
+  page += "<label>Nom de l'appareil : <input name='device_name' maxlength='";
+  page += String(DEVICE_NAME_MAX_LENGTH - 1);
+  page += "' value='";
+  if (strlen(deviceConfig.deviceName) > 0) {
+    page += deviceConfig.deviceName;
+  }
+  page += "' required></label><br><br>";
+  page += "<p>L'adresse du serveur MQTT sera configurée automatiquement lors de la détection par le serveur Django.</p>";
+  page += "<button type='submit'>Enregistrer</button></form></body></html>";
+  server.send(200, "text/html", page);
+}
+
+void handleSave() {
+  if (!server.hasArg("ssid") || !server.hasArg("device_name")) {
+    server.send(400, "text/plain", "Paramètres manquants");
+    return;
+  }
+
+  String newSsid = server.arg("ssid");
+  String newPassword = server.hasArg("password") ? server.arg("password") : "";
+  String newDeviceName = server.arg("device_name");
+
+  newSsid.trim();
+  newPassword.trim();
+  newDeviceName.trim();
+
+  if (newSsid.length() == 0 || newDeviceName.length() == 0) {
+    server.send(400, "text/plain", "Le SSID et le nom de l'appareil sont obligatoires");
+    return;
+  }
+
+  if (newDeviceName.length() >= DEVICE_NAME_MAX_LENGTH) {
+    server.send(400, "text/plain", "Le nom de l'appareil est trop long");
+    return;
+  }
+
+  newSsid.toCharArray(deviceConfig.ssid, sizeof(deviceConfig.ssid));
+  newPassword.toCharArray(deviceConfig.password, sizeof(deviceConfig.password));
+  newDeviceName.toCharArray(deviceConfig.deviceName, sizeof(deviceConfig.deviceName));
+  saveConfig(deviceConfig);
+  credentialsLoaded = strlen(deviceConfig.ssid) > 0;
+
+  refreshMqttClientId();
+  configureMqttClient();
+  if (client.connected()) {
+    client.disconnect();
+  }
+
+  bool connected = connectToSavedWifi(true);
+
+  if (connected) {
+    if (isMqttConfigured()) {
+      reconnect();
+    }
+    server.send(200, "text/html", "<html><body><h1>Connexion réussie</h1><p>L'ESP8266 est connecté au réseau \"" + newSsid + "\".</p><p>Nom de l'appareil&nbsp;: " + newDeviceName + "</p><p>Le serveur Django configurera automatiquement le broker MQTT lors de la détection.</p></body></html>");
+  } else {
+    server.send(200, "text/html", "<html><body><h1>Connexion impossible</h1><p>Vérifiez les informations saisies et réessayez.</p></body></html>");
+  }
+}
+
+void stopAccessPoint() {
+  dnsServer.stop();
+  WiFi.softAPdisconnect(true);
+  apActive = false;
+}
+
+bool loadConfig() {
+  memset(&deviceConfig, 0, sizeof(deviceConfig));
+  EEPROM.get(0, deviceConfig);
+
+  bool wifiConfigured = deviceConfig.ssid[0] != '\0' && deviceConfig.ssid[0] != char(0xFF);
+  bool mqttConfigured = deviceConfig.mqttServer[0] != '\0' && deviceConfig.mqttServer[0] != char(0xFF);
+  bool nameConfigured = deviceConfig.deviceName[0] != '\0' && deviceConfig.deviceName[0] != char(0xFF);
+
+  if (!wifiConfigured) {
+    memset(deviceConfig.ssid, 0, sizeof(deviceConfig.ssid));
+    memset(deviceConfig.password, 0, sizeof(deviceConfig.password));
+  }
+  if (!mqttConfigured) {
+    memset(deviceConfig.mqttServer, 0, sizeof(deviceConfig.mqttServer));
+  }
+  if (!nameConfigured) {
+    memset(deviceConfig.deviceName, 0, sizeof(deviceConfig.deviceName));
+  }
+
+  return wifiConfigured;
+}
+
+void saveConfig(const DeviceConfig &data) {
+  EEPROM.put(0, data);
+  EEPROM.commit();
+}
+
+bool connectToSavedWifi(bool blocking) {
+  if (!credentialsLoaded || strlen(deviceConfig.ssid) == 0) {
+    return false;
+  }
+
+  WiFi.begin(deviceConfig.ssid, deviceConfig.password);
+  lastReconnectAttempt = millis();
+
+  if (!blocking) {
+    return true;
+  }
+
+  unsigned long startAttempt = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 15000) {
+    delay(500);
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    stopAccessPoint();
+    return true;
+  }
+
+  return false;
+}
+
+bool handleCaptivePortal() {
+  if (!apActive) {
+    return false;
+  }
+
+  String host = server.hostHeader();
+  if (!host.length()) {
+    return false;
+  }
+
+  IPAddress apIP = WiFi.softAPIP();
+  String apIpStr = apIP.toString();
+
+  if (host == apIpStr || host == String(ap_ssid) || host == apIpStr + ":80") {
+    return false;
+  }
+
+  server.sendHeader("Location", String("http://") + apIpStr);
+  server.send(302, "text/html", "<!DOCTYPE html><html><head><meta http-equiv='refresh' content='0; url=http://" + apIpStr + "' /></head><body>Redirection vers le portail de configuration…</body></html>");
+  return true;
+}
+
+void handleIdentify() {
+  StaticJsonDocument<200> doc;
+  doc["device_type"] = "esp8266-radiator";
+  doc["name"] = deviceConfig.deviceName;
+  doc["ip_address"] = WiFi.localIP().toString();
+  doc["mac_address"] = WiFi.macAddress();
+  if (isMqttConfigured()) {
+    doc["mqtt_server"] = deviceConfig.mqttServer;
+  }
+
+  String payload;
+  serializeJson(doc, payload);
+  server.send(200, "application/json", payload);
+}
+
+void handleDeviceName() {
+  if (!server.hasArg("plain")) {
+    server.send(400, "application/json", "{\"error\":\"Requête invalide\"}");
+    return;
+  }
+
+  StaticJsonDocument<128> doc;
+  DeserializationError error = deserializeJson(doc, server.arg("plain"));
+  if (error) {
+    server.send(400, "application/json", "{\"error\":\"JSON invalide\"}");
+    return;
+  }
+
+  const char* requestedName = doc["name"];
+  if (requestedName == nullptr) {
+    server.send(400, "application/json", "{\"error\":\"Nom manquant\"}");
+    return;
+  }
+
+  String newName = String(requestedName);
+  newName.trim();
+  if (newName.length() == 0) {
+    server.send(400, "application/json", "{\"error\":\"Nom invalide\"}");
+    return;
+  }
+  if (newName.length() >= DEVICE_NAME_MAX_LENGTH) {
+    server.send(400, "application/json", "{\"error\":\"Nom trop long\"}");
+    return;
+  }
+
+  newName.toCharArray(deviceConfig.deviceName, sizeof(deviceConfig.deviceName));
+  saveConfig(deviceConfig);
+  refreshMqttClientId();
+  configureMqttClient();
+
+  if (client.connected()) {
+    client.disconnect();
+  }
+  if (WiFi.status() == WL_CONNECTED && isMqttConfigured()) {
+    reconnect();
+  }
+
+  StaticJsonDocument<96> response;
+  response["status"] = "ok";
+  response["name"] = deviceConfig.deviceName;
+  String payload;
+  serializeJson(response, payload);
+  server.send(200, "application/json", payload);
+}
+
+void handleMqttHost() {
+  if (!server.hasArg("plain")) {
+    server.send(400, "application/json", "{\"error\":\"Requête invalide\"}");
+    return;
+  }
+
+  StaticJsonDocument<128> doc;
+  DeserializationError error = deserializeJson(doc, server.arg("plain"));
+  if (error) {
+    server.send(400, "application/json", "{\"error\":\"JSON invalide\"}");
+    return;
+  }
+
+  const char* requestedHost = doc["host"];
+  if (requestedHost == nullptr) {
+    server.send(400, "application/json", "{\"error\":\"Adresse manquante\"}");
+    return;
+  }
+
+  String hostValue = String(requestedHost);
+  hostValue.trim();
+  if (hostValue.length() == 0) {
+    server.send(400, "application/json", "{\"error\":\"Adresse invalide\"}");
+    return;
+  }
+
+  if (hostValue.length() >= sizeof(deviceConfig.mqttServer)) {
+    server.send(400, "application/json", "{\"error\":\"Adresse trop longue\"}");
+    return;
+  }
+
+  char previousHost[sizeof(deviceConfig.mqttServer)];
+  strncpy(previousHost, deviceConfig.mqttServer, sizeof(previousHost));
+  previousHost[sizeof(previousHost) - 1] = '\0';
+
+  hostValue.toCharArray(deviceConfig.mqttServer, sizeof(deviceConfig.mqttServer));
+  saveConfig(deviceConfig);
+  configureMqttClient();
+
+  bool hostChanged = strcmp(previousHost, deviceConfig.mqttServer) != 0;
+  if (hostChanged && client.connected()) {
+    client.disconnect();
+  }
+
+  StaticJsonDocument<96> response;
+  response["status"] = "ok";
+  response["host"] = deviceConfig.mqttServer;
+  String payload;
+  serializeJson(response, payload);
+  server.send(200, "application/json", payload);
+
+  if (WiFi.status() == WL_CONNECTED) {
+    if (!client.connected() || hostChanged) {
+      reconnect();
+    }
+  }
+}
+
+void handleNotFound() {
+  if (handleCaptivePortal()) {
+    return;
+  }
+
+  server.send(404, "text/plain", "Not found");
 }
 
 void clignoter(int totalDuration, int blinkSpeed) {
@@ -179,7 +557,7 @@ void checkEtat(){
 
   const size_t capacity = JSON_OBJECT_SIZE(3); // Réglez la capacité en fonction du nombre de paires clé-valeur que vous prévoyez d'avoir
   DynamicJsonDocument message(capacity);
-  message["FROM"] = mqtt_client_id;
+  message["FROM"] = mqttClientId;
   message["TO"] = "Django";
   message["COMMAND"] = mode;
 
@@ -188,6 +566,35 @@ void checkEtat(){
   delay(10);
   publishMessage(jsonStr);
 
+}
+
+bool ensureDeviceName() {
+  if (deviceConfig.deviceName[0] == '\0' || deviceConfig.deviceName[0] == char(0xFF)) {
+    String fallback = String("Radiateur-");
+    fallback += String(ESP.getChipId(), HEX);
+    fallback.toUpperCase();
+    fallback.toCharArray(deviceConfig.deviceName, sizeof(deviceConfig.deviceName));
+    return true;
+  }
+  return false;
+}
+
+bool isMqttConfigured() {
+  return deviceConfig.mqttServer[0] != '\0' && deviceConfig.mqttServer[0] != char(0xFF);
+}
+
+void configureMqttClient() {
+  if (isMqttConfigured()) {
+    client.setServer(deviceConfig.mqttServer, mqtt_port);
+  }
+}
+
+void refreshMqttClientId() {
+  if (deviceConfig.deviceName[0] == '\0') {
+    ensureDeviceName();
+  }
+  strncpy(mqttClientId, deviceConfig.deviceName, sizeof(mqttClientId) - 1);
+  mqttClientId[sizeof(mqttClientId) - 1] = '\0';
 }
 
 

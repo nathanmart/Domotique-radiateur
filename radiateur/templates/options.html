@@ -16,11 +16,66 @@
         <div class="btn-placeholder"></div>
     </div>
 
-    <p class="text-muted small mb-3">
+    <p class="text-muted small mb-2">
         Désactivez un radiateur pour forcer en permanence le mode Éco. Les radiateurs désactivés ne répondront plus aux commandes depuis la page principale tant qu'ils ne sont pas réactivés ici.
     </p>
 
+    <div class="alert alert-info py-2 px-3 small mb-3">
+        <strong>Serveur MQTT&nbsp;:</strong> {{ mqtt_host }}
+    </div>
+
     <div id="statusMessage" class="alert d-none" role="alert"></div>
+
+    <div class="card option-card mb-3">
+        <div class="card-body">
+            <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3">
+                <div>
+                    <h2 class="h6 mb-1">Détecter les ESP8266</h2>
+                    <p class="option-description mb-0">Lancez un scan du réseau local pour trouver les radiateurs nouvellement configurés. Les appareils répondant seront ajoutés automatiquement.</p>
+                </div>
+                <div class="text-lg-end">
+                    <button id="scanDevicesButton" type="button" class="btn btn-primary">Rechercher sur le réseau</button>
+                </div>
+            </div>
+            <p class="text-muted small mb-0 mt-3">Assurez-vous que l'ESP8266 est connecté à votre Wi-Fi domestique et qu'il a reçu un nom via son portail de configuration.</p>
+        </div>
+    </div>
+
+    <div class="card option-card mb-3">
+        <div class="card-body">
+            <h2 class="h6 mb-3">Appareils enregistrés</h2>
+            {% if custom_devices %}
+                <ul class="list-group list-group-flush" id="deviceList">
+                    {% for device in custom_devices %}
+                        <li class="list-group-item px-0" data-device-name="{{ device.name }}" data-device-ip="{{ device.ip_address|default_if_none:'' }}">
+                            <div class="row align-items-center g-3">
+                                <div class="col-lg-5">
+                                    <label for="device-name-{{ forloop.counter0 }}" class="form-label small text-muted mb-1">Nom MQTT</label>
+                                    <input type="text" class="form-control form-control-sm device-name-input" id="device-name-{{ forloop.counter0 }}" value="{{ device.name }}" data-original-name="{{ device.name }}" maxlength="63">
+                                </div>
+                                <div class="col-lg-3">
+                                    {% if device.ip_address %}
+                                        <div class="text-muted small">IP&nbsp;: <span class="device-ip">{{ device.ip_address }}</span></div>
+                                    {% else %}
+                                        <div class="text-muted small">IP inconnue</div>
+                                    {% endif %}
+                                    <div class="text-muted small">Ajouté le {{ device.added_at_display }}</div>
+                                </div>
+                                <div class="col-lg-4 text-lg-end">
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        <button type="button" class="btn btn-outline-primary rename-device-btn" data-original-name="{{ device.name }}">Renommer</button>
+                                        <button type="button" class="btn btn-outline-danger delete-device-btn" data-name="{{ device.name }}">Supprimer</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p class="text-muted mb-0">Aucun appareil n'a encore été détecté sur le réseau.</p>
+            {% endif %}
+        </div>
+    </div>
 
     {% for radiator, is_disabled in radiator_options %}
         <div class="card option-card mb-3">
@@ -60,7 +115,7 @@
 
     function showMessage(type, message) {
         const container = document.getElementById('statusMessage');
-        container.className = 'alert alert-' + type;
+        container.className = 'alert alert-' + type + ' py-2 px-3 small';
         container.textContent = message;
     }
 
@@ -96,6 +151,150 @@
 
     document.getElementById('backButton').addEventListener('click', () => {
         window.location.href = '/';
+    });
+
+    const scanButton = document.getElementById('scanDevicesButton');
+    if (scanButton) {
+        scanButton.addEventListener('click', () => {
+            scanButton.disabled = true;
+            showMessage('info', 'Recherche des ESP8266 en cours…');
+
+            fetch('/devices/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken'),
+                },
+                body: JSON.stringify({}),
+            })
+                .then((response) => {
+                    if (!response.ok) {
+                        return response.json().then((data) => {
+                            throw new Error(data.error || 'La recherche a échoué.');
+                        });
+                    }
+                    return response.json();
+                })
+                .then((data) => {
+                    const addedCount = (data.added || []).length;
+                    const detected = data.detected ?? 0;
+                    const existingCount = (data.existing || []).length;
+                    const configuredCount = (data.configured || []).length;
+
+                    if (addedCount > 0) {
+                        showMessage('success', `${addedCount} nouvel${addedCount > 1 ? 's' : ''} appareil${addedCount > 1 ? 's' : ''} ajouté${addedCount > 1 ? 's' : ''}. La page va se recharger.`);
+                        setTimeout(() => window.location.reload(), 900);
+                    } else if (configuredCount > 0) {
+                        showMessage('success', `${configuredCount} appareil${configuredCount > 1 ? 's' : ''} configuré${configuredCount > 1 ? 's' : ''} avec le serveur MQTT.`);
+                    } else if (existingCount > 0 || detected > 0) {
+                        showMessage('info', 'Tous les appareils détectés étaient déjà enregistrés.');
+                    } else {
+                        showMessage('warning', 'Aucun ESP8266 n\'a répondu sur le réseau local.');
+                    }
+                })
+                .catch((error) => {
+                    showMessage('danger', error.message || 'Impossible de scanner le réseau.');
+                })
+                .finally(() => {
+                    scanButton.disabled = false;
+                });
+        });
+    }
+
+    document.querySelectorAll('.rename-device-btn').forEach((button) => {
+        button.addEventListener('click', () => {
+            const originalName = button.dataset.originalName || '';
+            const container = button.closest('li[data-device-name]');
+            const input = container ? container.querySelector('.device-name-input') : null;
+            if (!input) {
+                showMessage('danger', 'Impossible de retrouver ce champ de saisie.');
+                return;
+            }
+
+            const newName = (input.value || '').trim();
+            if (!newName) {
+                showMessage('warning', 'Le nom ne peut pas être vide.');
+                input.focus();
+                return;
+            }
+            if (newName === originalName) {
+                showMessage('info', 'Aucun changement détecté.');
+                return;
+            }
+
+            button.disabled = true;
+            showMessage('info', `Renommage de ${originalName}…`);
+
+            fetch('/devices/', {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken'),
+                },
+                body: JSON.stringify({
+                    old_name: originalName,
+                    new_name: newName,
+                }),
+            })
+                .then((response) => {
+                    if (!response.ok) {
+                        return response.json().then((data) => {
+                            throw new Error(data.error || 'Impossible de renommer cet appareil.');
+                        });
+                    }
+                    return response.json();
+                })
+                .then(() => {
+                    showMessage('success', `${originalName} est maintenant nommé ${newName}. La page va se recharger.`);
+                    setTimeout(() => window.location.reload(), 900);
+                })
+                .catch((error) => {
+                    showMessage('danger', error.message || 'Impossible de renommer cet appareil.');
+                    button.disabled = false;
+                });
+        });
+    });
+
+    document.querySelectorAll('.delete-device-btn').forEach((button) => {
+        button.addEventListener('click', () => {
+            const name = button.dataset.name || '';
+            if (!name) {
+                showMessage('danger', 'Nom d\'appareil introuvable.');
+                return;
+            }
+
+            if (!confirm(`Supprimer ${name} de la liste ?`)) {
+                return;
+            }
+
+            button.disabled = true;
+            showMessage('info', `Suppression de ${name}…`);
+
+            fetch('/devices/', {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken'),
+                },
+                body: JSON.stringify({ name }),
+            })
+                .then((response) => {
+                    if (!response.ok) {
+                        return response.json().then((data) => {
+                            throw new Error(data.error || 'Impossible de supprimer cet appareil.');
+                        });
+                    }
+                    return response.json();
+                })
+                .then(() => {
+                    showMessage('success', `${name} a été supprimé. La page va se recharger.`);
+                    setTimeout(() => window.location.reload(), 800);
+                })
+                .catch((error) => {
+                    showMessage('danger', error.message || 'Impossible de supprimer cet appareil.');
+                    button.disabled = false;
+                });
+        });
     });
 </script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
