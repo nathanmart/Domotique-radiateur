@@ -331,6 +331,7 @@ def options(request):
 
 ESP_DISCOVERY_ENDPOINT = "/identify"
 ESP_RENAME_ENDPOINT = "/device-name"
+ESP_MQTT_HOST_ENDPOINT = "/mqtt-host"
 ESP_DISCOVERY_TIMEOUT = 1.5
 ESP_DISCOVERY_SIGNATURE = "esp8266-radiator"
 ESP_SCAN_MAX_WORKERS = 24
@@ -460,12 +461,47 @@ def _push_device_name(ip: str, name: str) -> bool:
     return isinstance(data, dict) and data.get("status") == "ok"
 
 
+def _push_mqtt_host(ip: str, host: str) -> bool:
+    """Send the MQTT broker address to the ESP8266."""
+
+    payload = json.dumps({"host": host})
+    connection: http.client.HTTPConnection | None = None
+    try:
+        connection = http.client.HTTPConnection(ip, timeout=ESP_DISCOVERY_TIMEOUT)
+        connection.request(
+            "POST",
+            ESP_MQTT_HOST_ENDPOINT,
+            body=payload.encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        response = connection.getresponse()
+        if response.status != 200:
+            return False
+        raw = response.read()
+    except (OSError, http.client.HTTPException):
+        return False
+    finally:
+        if connection is not None:
+            try:
+                connection.close()
+            except OSError:
+                pass
+
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return False
+
+    return isinstance(data, dict) and data.get("status") == "ok"
+
+
 @csrf_exempt
 @never_cache
 def devices(request):
     """Manage ESP8266 registrations via the JSON registry."""
 
     if request.method == "POST":
+        mqtt_host = _detect_local_ip(MQTT_SETTINGS.host)
         hosts = _enumerate_local_hosts()
         if not hosts:
             return JsonResponse(
@@ -480,6 +516,7 @@ def devices(request):
 
         added: list[dict[str, str | None]] = []
         existing: list[dict[str, str | None]] = []
+        configured: list[str] = []
         seen: set[str] = set()
 
         state_map = get_liste_etat()
@@ -497,10 +534,23 @@ def devices(request):
             except ValueError:
                 continue
 
+            assigned_host: str | None = None
+            if record.ip_address and mqtt_host:
+                if _push_mqtt_host(record.ip_address, mqtt_host):
+                    assigned_host = mqtt_host
+                    configured.append(record.name)
+                else:
+                    enregistrer_log(
+                        "Impossible de configurer le broker MQTT pour %s (%s)",
+                        record.name,
+                        record.ip_address,
+                    )
+
             entry = {
                 "name": record.name,
                 "ip_address": record.ip_address,
                 "added_at": record.added_at.isoformat(),
+                "mqtt_host": assigned_host,
             }
 
             if created:
@@ -527,6 +577,7 @@ def devices(request):
             "added": added,
             "existing": existing,
             "detected": len(discovered),
+            "configured": configured,
         }
         return JsonResponse(payload)
 

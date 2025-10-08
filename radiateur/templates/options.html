@@ -179,10 +179,13 @@
                     const addedCount = (data.added || []).length;
                     const detected = data.detected ?? 0;
                     const existingCount = (data.existing || []).length;
+                    const configuredCount = (data.configured || []).length;
 
                     if (addedCount > 0) {
                         showMessage('success', `${addedCount} nouvel${addedCount > 1 ? 's' : ''} appareil${addedCount > 1 ? 's' : ''} ajouté${addedCount > 1 ? 's' : ''}. La page va se recharger.`);
                         setTimeout(() => window.location.reload(), 900);
+                    } else if (configuredCount > 0) {
+                        showMessage('success', `${configuredCount} appareil${configuredCount > 1 ? 's' : ''} configuré${configuredCount > 1 ? 's' : ''} avec le serveur MQTT.`);
                     } else if (existingCount > 0 || detected > 0) {
                         showMessage('info', 'Tous les appareils détectés étaient déjà enregistrés.');
                     } else {
