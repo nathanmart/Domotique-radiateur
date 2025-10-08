@@ -146,7 +146,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
   // else if (texte == "HORSGEL") modeHorsGel();
   // else if (texte == "ETAT") checkEtat();
 
-  DynamicJsonDocument doc(JSON_OBJECT_SIZE(3));
+  DynamicJsonDocument doc(256);
   DeserializationError error = deserializeJson(doc, texte);
 
     // Vérifiez s'il y a eu une erreur d'analyse JSON
@@ -555,8 +555,7 @@ void checkEtat(){
     mode = "HORS GEL";
   }
 
-  const size_t capacity = JSON_OBJECT_SIZE(3); // Réglez la capacité en fonction du nombre de paires clé-valeur que vous prévoyez d'avoir
-  DynamicJsonDocument message(capacity);
+  DynamicJsonDocument message(256);
   message["FROM"] = mqttClientId;
   message["TO"] = "Django";
   message["COMMAND"] = mode;
