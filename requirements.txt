@@ -2,3 +2,4 @@ Django==5.0.1
 paho-mqtt
 pytz
 python-dotenv
+netifaces
