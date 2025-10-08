@@ -89,3 +89,18 @@ Ce script utilise les mêmes variables d'environnement pour publier des messages
   ```
 
 Ce guide couvre l'essentiel pour démarrer rapidement le projet sur un Raspberry Pi.
+
+## Indicateurs lumineux de l'ESP8266
+
+L'ESP8266 embarque un indicateur lumineux intégré (LED) configuré dans `ESP8266/main.ino`.
+Il informe en temps réel sur la progression de la connexion :
+
+| État du microcontrôleur | Motif lumineux (LED active sur un ESP-12E = LED allumée) | Signification |
+| --- | --- | --- |
+| Connexion Wi-Fi en cours | Deux éclats rapides espacés de 150 ms (`on/off` répétés) | L'ESP cherche le réseau Wi-Fi enregistré ou tente de s'y reconnecter. |
+| Wi-Fi connecté, en attente du serveur Django | Deux éclats moyens (200 ms) suivis d'une pause d'1 s | Le Wi-Fi est disponible mais la configuration côté serveur (API) reste incomplète. |
+| Wi-Fi + serveur OK, connexion MQTT en attente | Trois éclats de 200 ms puis une pause de 800 ms | L'ESP attend de joindre le broker MQTT configuré. |
+| Tout connecté | Flash discret (60 ms) toutes les ~3 s | Wi-Fi, Django et MQTT fonctionnent : l'appareil est pleinement opérationnel. |
+| Changement d'état appliqué | Deux brefs flashs de 120 ms suivis d'une courte pause | Confirmation visuelle que le relais a bien reçu un nouvel ordre (Confort, Éco, Hors gel ou Arrêt). |
+
+> Remarque : La LED intégrée de l'ESP8266 est câblée en logique inverse (LOW = allumé).

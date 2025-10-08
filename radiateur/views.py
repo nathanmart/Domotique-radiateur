@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import socket
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -17,6 +18,11 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt
 
 from typing import Optional
+
+try:
+    import netifaces  # type: ignore
+except ImportError:  # pragma: no cover - optional dependency handled at runtime
+    netifaces = None
 
 from .config import MQTT_SETTINGS, TIMEZONE
 from .models import (
@@ -335,29 +341,158 @@ ESP_MQTT_HOST_ENDPOINT = "/mqtt-host"
 ESP_DISCOVERY_TIMEOUT = 1.5
 ESP_DISCOVERY_SIGNATURE = "esp8266-radiator"
 ESP_SCAN_MAX_WORKERS = 24
+ESP_SCAN_MAX_HOSTS = 1024
+
+
+def _collect_candidate_networks(local_ip: str) -> list[ip_network]:
+    """Return IPv4 networks that should be scanned for ESP8266 modules."""
+
+    networks: list[ip_network] = []
+    seen: set[str] = set()
+
+    def register(network: ip_network) -> None:
+        if network.version != 4:
+            return
+        if network.prefixlen >= 31:
+            return
+        if network.num_addresses > ESP_SCAN_MAX_HOSTS + 2:
+            return
+        key = network.with_prefixlen
+        if key in seen:
+            return
+        seen.add(key)
+        networks.append(network)
+
+    if netifaces is not None:
+        for interface in netifaces.interfaces():
+            try:
+                addresses = netifaces.ifaddresses(interface)
+            except ValueError:
+                continue
+            for details in addresses.get(netifaces.AF_INET, []):
+                addr = details.get("addr")
+                netmask = details.get("netmask")
+                if not addr or not netmask:
+                    continue
+                try:
+                    network = ip_network(f"{addr}/{netmask}", strict=False)
+                except ValueError:
+                    continue
+                register(network)
+
+    try:
+        parsed_local = ip_network(f"{local_ip}/24", strict=False)
+    except ValueError:
+        parsed_local = None
+    if parsed_local is not None:
+        register(parsed_local)
+
+    try:
+        mqtt_ip = ip_address(MQTT_SETTINGS.host)
+    except ValueError:
+        mqtt_ip = None
+    if mqtt_ip is not None and mqtt_ip.version == 4 and not mqtt_ip.is_loopback:
+        try:
+            register(ip_network(f"{mqtt_ip}/24", strict=False))
+        except ValueError:
+            pass
+
+    return networks
 
 
 def _enumerate_local_hosts() -> list[str]:
-    """Return the IPv4 hosts belonging to the local /24 network."""
+    """Return IPv4 hosts that are worth probing for ESP8266 discovery."""
 
     local_ip = _detect_local_ip(MQTT_SETTINGS.host)
     try:
-        parsed = ip_address(local_ip)
+        parsed_local = ip_address(local_ip)
     except ValueError:
-        return []
+        parsed_local = None
 
-    if parsed.version != 4 or parsed.is_loopback or parsed.is_unspecified:
-        return []
+    local_ip_str = str(parsed_local) if parsed_local is not None else ""
+    hosts: list[str] = []
+    seen: set[str] = set()
+
+    def add_host(value: str) -> None:
+        if value == local_ip_str:
+            return
+        if value in seen:
+            return
+        seen.add(value)
+        hosts.append(value)
+
+    for device in load_devices():
+        if not device.ip_address:
+            continue
+        try:
+            parsed = ip_address(device.ip_address)
+        except ValueError:
+            continue
+        if parsed.version != 4 or parsed.is_loopback or parsed.is_unspecified:
+            continue
+        add_host(str(parsed))
+
+    networks = _collect_candidate_networks(local_ip)
+    for network in networks:
+        remaining = ESP_SCAN_MAX_HOSTS - len(hosts)
+        if remaining <= 0:
+            break
+
+        total_hosts = max(network.num_addresses - 2, 0)
+        if total_hosts == 0:
+            continue
+
+        focus_ip = None
+        if parsed_local is not None and parsed_local in network:
+            focus_ip = int(parsed_local)
+
+        if total_hosts <= remaining:
+            for host in network.hosts():
+                if len(hosts) >= ESP_SCAN_MAX_HOSTS:
+                    break
+                add_host(str(host))
+            continue
+
+        step = max(1, math.ceil(total_hosts / remaining))
+        network_start = int(network.network_address) + 1
+        network_end = int(network.broadcast_address) - 1
+
+        sampled: set[int] = set()
+
+        def enqueue(address: int) -> None:
+            if len(hosts) >= ESP_SCAN_MAX_HOSTS:
+                return
+            if address < network_start or address > network_end:
+                return
+            if address in sampled:
+                return
+            sampled.add(address)
+            add_host(str(ip_address(address)))
+
+        if focus_ip is not None:
+            enqueue(focus_ip)
+
+            offset = step
+            while len(hosts) < ESP_SCAN_MAX_HOSTS and offset <= total_hosts:
+                enqueue(focus_ip - offset)
+                enqueue(focus_ip + offset)
+                offset += step
+
+        current = network_start
+        while len(hosts) < ESP_SCAN_MAX_HOSTS and current <= network_end:
+            enqueue(current)
+            current += step
+
+        enqueue(network_start)
+        enqueue(network_end)
 
     try:
-        network = ip_network(f"{local_ip}/24", strict=False)
+        mqtt_ip = ip_address(MQTT_SETTINGS.host)
     except ValueError:
-        return []
+        mqtt_ip = None
+    if mqtt_ip is not None and mqtt_ip.version == 4 and not mqtt_ip.is_loopback:
+        add_host(str(mqtt_ip))
 
-    hosts: list[str] = []
-    for host in network.hosts():
-        if str(host) != local_ip:
-            hosts.append(str(host))
     return hosts
 
 

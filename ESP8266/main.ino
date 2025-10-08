@@ -17,6 +17,7 @@ const size_t DEVICE_NAME_MAX_LENGTH = 64;
 const char* ap_ssid = "Radiateur-Setup";
 const int EEPROM_SIZE = 256;
 const int RECONNECT_INTERVAL = 10000; // 10 secondes
+const unsigned long MQTT_RECONNECT_INTERVAL = 5000; // 5 secondes
 const byte DNS_PORT = 53;
 
 struct DeviceConfig {
@@ -40,8 +41,92 @@ DNSServer dnsServer;
 DeviceConfig deviceConfig;
 bool credentialsLoaded = false;
 unsigned long lastReconnectAttempt = 0;
+unsigned long lastMqttReconnectAttempt = 0;
 bool apActive = false;
 char mqttClientId[DEVICE_NAME_MAX_LENGTH];
+
+enum LedPatternId : uint8_t {
+  LED_PATTERN_WIFI_CONNECTING = 0,
+  LED_PATTERN_WAITING_FOR_SERVER,
+  LED_PATTERN_WAITING_FOR_MQTT,
+  LED_PATTERN_ONLINE,
+  LED_PATTERN_STATE_CHANGED,
+};
+
+struct BlinkStep {
+  bool ledOn;
+  uint16_t durationMs;
+};
+
+struct LedPatternDefinition {
+  const BlinkStep* steps;
+  size_t length;
+};
+
+const bool LED_ACTIVE_STATE = LOW;
+const bool LED_INACTIVE_STATE = HIGH;
+
+const BlinkStep LED_PATTERN_WIFI_CONNECTING_STEPS[] = {
+  {true, 150},
+  {false, 150},
+};
+
+const BlinkStep LED_PATTERN_WAITING_FOR_SERVER_STEPS[] = {
+  {true, 200},
+  {false, 200},
+  {true, 200},
+  {false, 800},
+};
+
+const BlinkStep LED_PATTERN_WAITING_FOR_MQTT_STEPS[] = {
+  {true, 200},
+  {false, 200},
+  {true, 200},
+  {false, 200},
+  {true, 200},
+  {false, 800},
+};
+
+const BlinkStep LED_PATTERN_ONLINE_STEPS[] = {
+  {true, 60},
+  {false, 2940},
+};
+
+const BlinkStep LED_PATTERN_STATE_CHANGED_STEPS[] = {
+  {true, 120},
+  {false, 120},
+  {true, 120},
+  {false, 600},
+};
+
+const unsigned long LED_PATTERN_STATE_CHANGED_DURATION_MS = 960;
+
+const LedPatternDefinition LED_PATTERNS[] = {
+  {LED_PATTERN_WIFI_CONNECTING_STEPS, sizeof(LED_PATTERN_WIFI_CONNECTING_STEPS) / sizeof(BlinkStep)},
+  {LED_PATTERN_WAITING_FOR_SERVER_STEPS, sizeof(LED_PATTERN_WAITING_FOR_SERVER_STEPS) / sizeof(BlinkStep)},
+  {LED_PATTERN_WAITING_FOR_MQTT_STEPS, sizeof(LED_PATTERN_WAITING_FOR_MQTT_STEPS) / sizeof(BlinkStep)},
+  {LED_PATTERN_ONLINE_STEPS, sizeof(LED_PATTERN_ONLINE_STEPS) / sizeof(BlinkStep)},
+  {LED_PATTERN_STATE_CHANGED_STEPS, sizeof(LED_PATTERN_STATE_CHANGED_STEPS) / sizeof(BlinkStep)},
+};
+
+LedPatternId baseLedPattern = LED_PATTERN_WIFI_CONNECTING;
+LedPatternId currentLedPattern = LED_PATTERN_WIFI_CONNECTING;
+size_t currentLedStep = 0;
+unsigned long currentLedStepStarted = 0;
+bool ledPatternInitialised = false;
+bool statusLedSuspended = false;
+bool overridePatternActive = false;
+unsigned long overridePatternDeadline = 0;
+
+enum RadiatorMode : uint8_t {
+  MODE_UNKNOWN = 0,
+  MODE_COMFORT,
+  MODE_ECO,
+  MODE_HORSGEL,
+  MODE_OFF,
+};
+
+RadiatorMode appliedMode = MODE_UNKNOWN;
 
 void startAccessPoint();
 void stopAccessPoint();
@@ -60,6 +145,161 @@ bool ensureDeviceName();
 void refreshMqttClientId();
 bool isMqttConfigured();
 void configureMqttClient();
+void updateStatusLed();
+void setStatusLedPattern(LedPatternId pattern);
+void suspendStatusLed(bool suspend);
+bool attemptMqttReconnect(bool forceAttempt = false);
+void setBaseStatusLedPattern(LedPatternId pattern);
+void activateTemporaryLedPattern(LedPatternId pattern, unsigned long durationMs);
+void triggerStateChangeBlink();
+RadiatorMode detectCurrentMode();
+const char* modeToCommand(RadiatorMode mode);
+void registerAppliedMode(RadiatorMode mode);
+
+void applyLedState(bool on) {
+  digitalWrite(LED_BUILTIN, on ? LED_ACTIVE_STATE : LED_INACTIVE_STATE);
+}
+
+void resetLedPatternState() {
+  const LedPatternDefinition& pattern = LED_PATTERNS[currentLedPattern];
+  currentLedStep = 0;
+  currentLedStepStarted = millis();
+  ledPatternInitialised = true;
+  if (pattern.length > 0) {
+    applyLedState(pattern.steps[0].ledOn);
+  }
+}
+
+void setStatusLedPattern(LedPatternId pattern) {
+  if (currentLedPattern == pattern && ledPatternInitialised && !statusLedSuspended) {
+    return;
+  }
+  currentLedPattern = pattern;
+  ledPatternInitialised = false;
+}
+
+void suspendStatusLed(bool suspend) {
+  statusLedSuspended = suspend;
+  if (suspend) {
+    overridePatternActive = false;
+  } else {
+    ledPatternInitialised = false;
+    setStatusLedPattern(baseLedPattern);
+  }
+}
+
+void advanceStatusLed() {
+  if (statusLedSuspended) {
+    return;
+  }
+  if (overridePatternActive) {
+    unsigned long now = millis();
+    if ((long)(now - overridePatternDeadline) >= 0) {
+      overridePatternActive = false;
+      setStatusLedPattern(baseLedPattern);
+    }
+  }
+  if (!ledPatternInitialised) {
+    resetLedPatternState();
+  }
+  const LedPatternDefinition& pattern = LED_PATTERNS[currentLedPattern];
+  if (pattern.length == 0) {
+    return;
+  }
+  unsigned long now = millis();
+  const BlinkStep* steps = pattern.steps;
+  const BlinkStep& step = steps[currentLedStep];
+  if (now - currentLedStepStarted >= step.durationMs) {
+    currentLedStep = (currentLedStep + 1) % pattern.length;
+    currentLedStepStarted = now;
+    applyLedState(steps[currentLedStep].ledOn);
+  }
+}
+
+void updateStatusLed() {
+  if (statusLedSuspended) {
+    return;
+  }
+  LedPatternId desiredPattern = LED_PATTERN_WIFI_CONNECTING;
+  if (WiFi.status() != WL_CONNECTED) {
+    desiredPattern = LED_PATTERN_WIFI_CONNECTING;
+  } else if (!isMqttConfigured()) {
+    desiredPattern = LED_PATTERN_WAITING_FOR_SERVER;
+  } else if (!client.connected()) {
+    desiredPattern = LED_PATTERN_WAITING_FOR_MQTT;
+  } else {
+    desiredPattern = LED_PATTERN_ONLINE;
+  }
+
+  setBaseStatusLedPattern(desiredPattern);
+  advanceStatusLed();
+}
+
+void setBaseStatusLedPattern(LedPatternId pattern) {
+  if (baseLedPattern == pattern) {
+    return;
+  }
+  baseLedPattern = pattern;
+  if (!overridePatternActive) {
+    setStatusLedPattern(baseLedPattern);
+  }
+}
+
+void activateTemporaryLedPattern(LedPatternId pattern, unsigned long durationMs) {
+  overridePatternActive = true;
+  overridePatternDeadline = millis() + durationMs;
+  setStatusLedPattern(pattern);
+}
+
+void triggerStateChangeBlink() {
+  if (statusLedSuspended) {
+    return;
+  }
+  activateTemporaryLedPattern(LED_PATTERN_STATE_CHANGED, LED_PATTERN_STATE_CHANGED_DURATION_MS);
+}
+
+RadiatorMode detectCurrentMode() {
+  int highState = digitalRead(pinHigh);
+  int lowState = digitalRead(pinLow);
+
+  if (highState == LOW && lowState == LOW) {
+    return MODE_COMFORT;
+  }
+  if (highState == HIGH && lowState == HIGH) {
+    return MODE_ECO;
+  }
+  if (highState == HIGH && lowState == LOW) {
+    return MODE_OFF;
+  }
+  if (highState == LOW && lowState == HIGH) {
+    return MODE_HORSGEL;
+  }
+  return MODE_UNKNOWN;
+}
+
+const char* modeToCommand(RadiatorMode mode) {
+  switch (mode) {
+    case MODE_COMFORT:
+      return "COMFORT";
+    case MODE_ECO:
+      return "ECO";
+    case MODE_OFF:
+      return "OFF";
+    case MODE_HORSGEL:
+      return "HORS GEL";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+void registerAppliedMode(RadiatorMode mode) {
+  if (appliedMode != mode) {
+    appliedMode = mode;
+    triggerStateChangeBlink();
+  } else {
+    appliedMode = mode;
+  }
+}
 
 void setup() {
   // Serial.begin(115200);
@@ -80,7 +320,15 @@ void setup() {
   digitalWrite(pinHigh, LOW);
   digitalWrite(pinLow, LOW);
 
+  appliedMode = detectCurrentMode();
+
+  setStatusLedPattern(LED_PATTERN_WIFI_CONNECTING);
+  updateStatusLed();
+
+  suspendStatusLed(true);
   clignoter(3000, 500);
+  suspendStatusLed(false);
+  updateStatusLed();
 
   WiFi.mode(WIFI_AP_STA);
   startAccessPoint();
@@ -93,6 +341,8 @@ void setup() {
 }
 
 void loop() {
+  updateStatusLed();
+
   server.handleClient();
 
   if (apActive) {
@@ -108,6 +358,7 @@ void loop() {
       lastReconnectAttempt = now;
       connectToSavedWifi();
     }
+    updateStatusLed();
     return;
   }
 
@@ -117,9 +368,11 @@ void loop() {
 
   if (isMqttConfigured()) {
     if (!client.connected()) {
-      reconnect();
+      attemptMqttReconnect(false);
     }
-    client.loop();
+    if (client.connected()) {
+      client.loop();
+    }
   }
 
   // Lecture de l'entrée série et publication de messages MQTT
@@ -127,6 +380,8 @@ void loop() {
     String input = Serial.readStringUntil('\n');
     publishMessage(input);
   }
+
+  updateStatusLed();
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
@@ -185,23 +440,28 @@ void publishMessage(String message) {
   // }
 }
 
-void reconnect() {
+bool attemptMqttReconnect(bool forceAttempt = false) {
   if (!isMqttConfigured()) {
-    return;
+    return false;
   }
-  while (!client.connected()) {
-    // Serial.print("Tentative de connexion au serveur MQTT...");
-    
-    if (client.connect(mqttClientId)) {
-      // Serial.println("Connecté au serveur MQTT");
-      client.subscribe(mqtt_topic);
-    } else {
-      // Serial.print("Échec, rc=");
-      // Serial.print(client.state());
-      // Serial.println(" Réessayez dans 5 secondes.");
-      delay(5000);
-    }
+
+  unsigned long now = millis();
+  if (!forceAttempt && (now - lastMqttReconnectAttempt) < MQTT_RECONNECT_INTERVAL) {
+    return client.connected();
   }
+
+  lastMqttReconnectAttempt = now;
+
+  if (client.connected()) {
+    return true;
+  }
+
+  if (client.connect(mqttClientId)) {
+    client.subscribe(mqtt_topic);
+    return true;
+  }
+
+  return false;
 }
 
 void startAccessPoint() {
@@ -294,7 +554,7 @@ void handleSave() {
 
   if (connected) {
     if (isMqttConfigured()) {
-      reconnect();
+      attemptMqttReconnect(true);
     }
     server.send(200, "text/html", "<html><body><h1>Connexion réussie</h1><p>L'ESP8266 est connecté au réseau \"" + newSsid + "\".</p><p>Nom de l'appareil&nbsp;: " + newDeviceName + "</p><p>Le serveur Django configurera automatiquement le broker MQTT lors de la détection.</p></body></html>");
   } else {
@@ -350,10 +610,12 @@ bool connectToSavedWifi(bool blocking) {
   unsigned long startAttempt = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 15000) {
     delay(500);
+    updateStatusLed();
   }
 
   if (WiFi.status() == WL_CONNECTED) {
     stopAccessPoint();
+    updateStatusLed();
     return true;
   }
 
@@ -436,8 +698,10 @@ void handleDeviceName() {
     client.disconnect();
   }
   if (WiFi.status() == WL_CONNECTED && isMqttConfigured()) {
-    reconnect();
+    attemptMqttReconnect(true);
   }
+
+  updateStatusLed();
 
   StaticJsonDocument<96> response;
   response["status"] = "ok";
@@ -500,9 +764,11 @@ void handleMqttHost() {
 
   if (WiFi.status() == WL_CONNECTED) {
     if (!client.connected() || hostChanged) {
-      reconnect();
+      attemptMqttReconnect(true);
     }
   }
+
+  updateStatusLed();
 }
 
 void handleNotFound() {
@@ -514,6 +780,7 @@ void handleNotFound() {
 }
 
 void clignoter(int totalDuration, int blinkSpeed) {
+  suspendStatusLed(true);
   int numberOfBlinks = totalDuration / (2 * blinkSpeed);
   for (int i = 0; i < numberOfBlinks; i++) {
     digitalWrite(LED_BUILTIN, LOW);
@@ -521,44 +788,43 @@ void clignoter(int totalDuration, int blinkSpeed) {
     digitalWrite(LED_BUILTIN, HIGH);
     delay(blinkSpeed);
   }
+  suspendStatusLed(false);
+  updateStatusLed();
 }
 
 void modeComfort(){
     digitalWrite(pinHigh, LOW);
     digitalWrite(pinLow, LOW);
+    registerAppliedMode(MODE_COMFORT);
 }
 
-void modeEco(){   
+void modeEco(){
   digitalWrite(pinHigh, HIGH);
   digitalWrite(pinLow, HIGH);
+  registerAppliedMode(MODE_ECO);
 }
 
 void modeHorsGel(){
   digitalWrite(pinHigh, LOW);
-  digitalWrite(pinLow, HIGH); 
+  digitalWrite(pinLow, HIGH);
+  registerAppliedMode(MODE_HORSGEL);
 }
 
 void modeOff(){
   digitalWrite(pinHigh, HIGH);
   digitalWrite(pinLow, LOW);
+  registerAppliedMode(MODE_OFF);
 }
 
 void checkEtat(){
-  String mode;
-  if (digitalRead(pinHigh) == LOW && digitalRead(pinLow) == LOW) {
-    mode = "COMFORT";
-  } else if (digitalRead(pinHigh) == HIGH && digitalRead(pinLow) == HIGH) {
-    mode = "ECO";
-  } else if (digitalRead(pinHigh) == HIGH && digitalRead(pinLow) == LOW) {
-    mode = "OFF";
-  } else {
-    mode = "HORS GEL";
-  }
+  RadiatorMode mode = detectCurrentMode();
+  const char* command = modeToCommand(mode);
+  appliedMode = mode;
 
   DynamicJsonDocument message(256);
   message["FROM"] = mqttClientId;
   message["TO"] = "Django";
-  message["COMMAND"] = mode;
+  message["COMMAND"] = command;
 
   String jsonStr;
   serializeJson(message, jsonStr);
@@ -586,6 +852,7 @@ void configureMqttClient() {
   if (isMqttConfigured()) {
     client.setServer(deviceConfig.mqttServer, mqtt_port);
   }
+  lastMqttReconnectAttempt = 0;
 }
 
 void refreshMqttClientId() {
