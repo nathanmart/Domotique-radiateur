@@ -139,6 +139,8 @@ def envoyer_changement_etat_mqtt(
     disabled_map = load_disabled_states()
     applied_modes: Dict[str, str] = {}
 
+    _ensure_state_entries()
+
     for appareil in liste_radiateur:
         forced_mode = "ECO" if disabled_map.get(appareil) else mode
         message = {
@@ -148,6 +150,7 @@ def envoyer_changement_etat_mqtt(
         }
         mqtt_client.publish(str(message), MQTT_SETTINGS.topic)
         applied_modes[appareil] = forced_mode
+        _liste_etat[appareil] = forced_mode
         enregistrer_log(f"Modification état: {appareil} --> {forced_mode}")
 
     return applied_modes

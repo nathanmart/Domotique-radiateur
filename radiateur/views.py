@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import socket
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -433,12 +434,57 @@ def _enumerate_local_hosts() -> list[str]:
 
     networks = _collect_candidate_networks(local_ip)
     for network in networks:
-        for host in network.hosts():
-            if len(hosts) >= ESP_SCAN_MAX_HOSTS:
-                break
-            add_host(str(host))
-        if len(hosts) >= ESP_SCAN_MAX_HOSTS:
+        remaining = ESP_SCAN_MAX_HOSTS - len(hosts)
+        if remaining <= 0:
             break
+
+        total_hosts = max(network.num_addresses - 2, 0)
+        if total_hosts == 0:
+            continue
+
+        focus_ip = None
+        if parsed_local is not None and parsed_local in network:
+            focus_ip = int(parsed_local)
+
+        if total_hosts <= remaining:
+            for host in network.hosts():
+                if len(hosts) >= ESP_SCAN_MAX_HOSTS:
+                    break
+                add_host(str(host))
+            continue
+
+        step = max(1, math.ceil(total_hosts / remaining))
+        network_start = int(network.network_address) + 1
+        network_end = int(network.broadcast_address) - 1
+
+        sampled: set[int] = set()
+
+        def enqueue(address: int) -> None:
+            if len(hosts) >= ESP_SCAN_MAX_HOSTS:
+                return
+            if address < network_start or address > network_end:
+                return
+            if address in sampled:
+                return
+            sampled.add(address)
+            add_host(str(ip_address(address)))
+
+        if focus_ip is not None:
+            enqueue(focus_ip)
+
+            offset = step
+            while len(hosts) < ESP_SCAN_MAX_HOSTS and offset <= total_hosts:
+                enqueue(focus_ip - offset)
+                enqueue(focus_ip + offset)
+                offset += step
+
+        current = network_start
+        while len(hosts) < ESP_SCAN_MAX_HOSTS and current <= network_end:
+            enqueue(current)
+            current += step
+
+        enqueue(network_start)
+        enqueue(network_end)
 
     try:
         mqtt_ip = ip_address(MQTT_SETTINGS.host)
