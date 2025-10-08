@@ -440,7 +440,7 @@ void publishMessage(String message) {
   // }
 }
 
-bool attemptMqttReconnect(bool forceAttempt = false) {
+bool attemptMqttReconnect(bool forceAttempt) {
   if (!isMqttConfigured()) {
     return false;
   }
