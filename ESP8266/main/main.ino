@@ -30,8 +30,8 @@ struct DeviceConfig {
 
 
 
-const int pinHigh = 14;
-const int pinLow = 12;
+const int pinHigh = 1;
+const int pinLow = 3;
 
 
 WiFiClient espClient;
