@@ -24,6 +24,18 @@ Ce firmware transforme l'ESP8266 en radiateur connecté piloté via MQTT. Il com
 - Si le message provient de `Django` et est destiné à ce nom, la commande associée déclenche les fonctions : `modeComfort`, `modeEco`, `modeOff`, `modeHorsGel`, `clignoter` ou `checkEtat`.
 - `checkEtat` publie l'état courant sur le même topic au format JSON.
 
+## Gestion de la mémoire d'état et du redémarrage
+
+- Le firmware mémorise désormais en EEPROM le dernier mode appliqué (Confort, Éco, Hors gel ou Off). Lorsqu'il redémarre après
+  une coupure de courant, l'ESP8266 restaure cette consigne sans passer par une séquence de clignotements parasites sur les
+  fils `pinHigh`/`pinLow`.
+- Au démarrage, les broches de pilotage sont laissées en haute impédance puis configurées en sortie uniquement une fois que la
+  configuration a été relue **et** qu'un court délai de sécurité (~1,5&nbsp;s) s'est écoulé. Cette précaution évite que le module
+  ne reste bloqué si les broches sont déjà reliées au montage au moment où l'alimentation 3,3&nbsp;V revient (cas typique après une
+  coupure secteur sur le radiateur).
+- Les changements d'état sont enregistrés avec une temporisation minimale d'une seconde pour limiter l'usure de l'EEPROM tout en
+  garantissant la reprise du dernier mode en cas de redémarrage brusque.
+
 ## Détection et administration depuis Django
 
 - L'ESP8266 expose une route HTTP `GET /identify` qui renvoie un JSON avec son nom, son adresse IP locale et son adresse MAC. Le serveur Django balaie régulièrement le réseau local via cette route lorsqu'on demande l'ajout d'appareils.

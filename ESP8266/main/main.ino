@@ -25,12 +25,13 @@ struct DeviceConfig {
   char password[64];
   char mqttServer[64];
   char deviceName[DEVICE_NAME_MAX_LENGTH];
+  uint8_t lastMode;
 };
 
 
 
-const int pinHigh = 14;
-const int pinLow = 12;
+const int pinHigh = 1;
+const int pinLow = 3;
 
 
 WiFiClient espClient;
@@ -127,6 +128,33 @@ enum RadiatorMode : uint8_t {
 };
 
 RadiatorMode appliedMode = MODE_UNKNOWN;
+RadiatorMode pendingMode = MODE_UNKNOWN;
+unsigned long lastModePersist = 0;
+unsigned long pilotPinsActivationDeadline = 0;
+bool pilotPinsConfigured = false;
+
+const unsigned long MODE_PERSIST_MIN_INTERVAL = 1000;
+const unsigned long PILOT_PIN_ACTIVATION_DELAY_MS = 1500;
+
+struct PilotPinLevels {
+  uint8_t highLevel;
+  uint8_t lowLevel;
+};
+
+PilotPinLevels levelsForMode(RadiatorMode mode) {
+  switch (mode) {
+    case MODE_COMFORT:
+      return {LOW, LOW};
+    case MODE_ECO:
+      return {HIGH, HIGH};
+    case MODE_OFF:
+      return {HIGH, LOW};
+    case MODE_HORSGEL:
+      return {LOW, HIGH};
+    default:
+      return {LOW, LOW};
+  }
+}
 
 void startAccessPoint();
 void stopAccessPoint();
@@ -155,6 +183,97 @@ void triggerStateChangeBlink();
 RadiatorMode detectCurrentMode();
 const char* modeToCommand(RadiatorMode mode);
 void registerAppliedMode(RadiatorMode mode);
+void ensureStartupModeApplied();
+void configurePilotPinsHighImpedance();
+
+void persistAppliedMode(RadiatorMode mode, bool force = false) {
+  uint8_t encodedMode = static_cast<uint8_t>(mode);
+
+  if (deviceConfig.lastMode == encodedMode) {
+    return;
+  }
+
+  unsigned long now = millis();
+  if (!force && lastModePersist != 0 && (now - lastModePersist) < MODE_PERSIST_MIN_INTERVAL) {
+    return;
+  }
+
+  deviceConfig.lastMode = encodedMode;
+  saveConfig(deviceConfig);
+  lastModePersist = now;
+}
+
+void applyPinLevels(const PilotPinLevels &levels) {
+  digitalWrite(pinHigh, levels.highLevel);
+  digitalWrite(pinLow, levels.lowLevel);
+}
+
+void configurePilotPinsHighImpedance() {
+  pinMode(pinHigh, INPUT);
+  digitalWrite(pinHigh, LOW);
+  pinMode(pinLow, INPUT);
+  digitalWrite(pinLow, LOW);
+}
+
+void setPilotPinsOutputs(const PilotPinLevels &levels) {
+  if (!pilotPinsConfigured) {
+    pinMode(pinHigh, OUTPUT);
+    pinMode(pinLow, OUTPUT);
+    pilotPinsConfigured = true;
+  }
+  applyPinLevels(levels);
+}
+
+RadiatorMode sanitizeMode(RadiatorMode mode) {
+  switch (mode) {
+    case MODE_COMFORT:
+    case MODE_ECO:
+    case MODE_OFF:
+    case MODE_HORSGEL:
+      return mode;
+    default:
+      return MODE_COMFORT;
+  }
+}
+
+RadiatorMode restoreStoredMode() {
+  if (deviceConfig.lastMode >= MODE_COMFORT && deviceConfig.lastMode <= MODE_OFF) {
+    return static_cast<RadiatorMode>(deviceConfig.lastMode);
+  }
+  return MODE_UNKNOWN;
+}
+
+void applyRadiatorMode(RadiatorMode mode) {
+  RadiatorMode sanitizedMode = sanitizeMode(mode);
+  pendingMode = sanitizedMode;
+
+  if (!pilotPinsConfigured) {
+    if ((long)(millis() - pilotPinsActivationDeadline) < 0) {
+      return;
+    }
+  }
+
+  PilotPinLevels levels = levelsForMode(sanitizedMode);
+  setPilotPinsOutputs(levels);
+  registerAppliedMode(sanitizedMode);
+  persistAppliedMode(sanitizedMode);
+}
+
+void ensureStartupModeApplied() {
+  if (pendingMode == MODE_UNKNOWN) {
+    return;
+  }
+
+  if (pilotPinsConfigured) {
+    return;
+  }
+
+  if ((long)(millis() - pilotPinsActivationDeadline) < 0) {
+    return;
+  }
+
+  applyRadiatorMode(pendingMode);
+}
 
 void applyLedState(bool on) {
   digitalWrite(LED_BUILTIN, on ? LED_ACTIVE_STATE : LED_INACTIVE_STATE);
@@ -274,6 +393,9 @@ RadiatorMode detectCurrentMode() {
   if (highState == LOW && lowState == HIGH) {
     return MODE_HORSGEL;
   }
+  if (!pilotPinsConfigured && pendingMode != MODE_UNKNOWN) {
+    return pendingMode;
+  }
   return MODE_UNKNOWN;
 }
 
@@ -305,6 +427,9 @@ void setup() {
   // Serial.begin(115200);
   // delay(10);
 
+  configurePilotPinsHighImpedance();
+  pilotPinsActivationDeadline = millis() + PILOT_PIN_ACTIVATION_DELAY_MS;
+
   EEPROM.begin(EEPROM_SIZE);
   credentialsLoaded = loadConfig();
   bool nameAssigned = ensureDeviceName();
@@ -313,14 +438,14 @@ void setup() {
     saveConfig(deviceConfig);
   }
 
-  pinMode(pinHigh, OUTPUT);
-  pinMode(pinLow, OUTPUT);
   pinMode(LED_BUILTIN, OUTPUT);
 
-  digitalWrite(pinHigh, LOW);
-  digitalWrite(pinLow, LOW);
-
-  appliedMode = detectCurrentMode();
+  RadiatorMode storedMode = restoreStoredMode();
+  if (storedMode == MODE_UNKNOWN) {
+    storedMode = detectCurrentMode();
+  }
+  storedMode = sanitizeMode(storedMode);
+  pendingMode = storedMode;
 
   setStatusLedPattern(LED_PATTERN_WIFI_CONNECTING);
   updateStatusLed();
@@ -341,6 +466,7 @@ void setup() {
 }
 
 void loop() {
+  ensureStartupModeApplied();
   updateStatusLed();
 
   server.handleClient();
@@ -575,6 +701,7 @@ bool loadConfig() {
   bool wifiConfigured = deviceConfig.ssid[0] != '\0' && deviceConfig.ssid[0] != char(0xFF);
   bool mqttConfigured = deviceConfig.mqttServer[0] != '\0' && deviceConfig.mqttServer[0] != char(0xFF);
   bool nameConfigured = deviceConfig.deviceName[0] != '\0' && deviceConfig.deviceName[0] != char(0xFF);
+  bool modeConfigured = deviceConfig.lastMode != char(0xFF) && deviceConfig.lastMode <= MODE_OFF;
 
   if (!wifiConfigured) {
     memset(deviceConfig.ssid, 0, sizeof(deviceConfig.ssid));
@@ -585,6 +712,9 @@ bool loadConfig() {
   }
   if (!nameConfigured) {
     memset(deviceConfig.deviceName, 0, sizeof(deviceConfig.deviceName));
+  }
+  if (!modeConfigured) {
+    deviceConfig.lastMode = MODE_UNKNOWN;
   }
 
   return wifiConfigured;
@@ -793,27 +923,19 @@ void clignoter(int totalDuration, int blinkSpeed) {
 }
 
 void modeComfort(){
-    digitalWrite(pinHigh, LOW);
-    digitalWrite(pinLow, LOW);
-    registerAppliedMode(MODE_COMFORT);
+    applyRadiatorMode(MODE_COMFORT);
 }
 
 void modeEco(){
-  digitalWrite(pinHigh, HIGH);
-  digitalWrite(pinLow, HIGH);
-  registerAppliedMode(MODE_ECO);
+  applyRadiatorMode(MODE_ECO);
 }
 
 void modeHorsGel(){
-  digitalWrite(pinHigh, LOW);
-  digitalWrite(pinLow, HIGH);
-  registerAppliedMode(MODE_HORSGEL);
+  applyRadiatorMode(MODE_HORSGEL);
 }
 
 void modeOff(){
-  digitalWrite(pinHigh, HIGH);
-  digitalWrite(pinLow, LOW);
-  registerAppliedMode(MODE_OFF);
+  applyRadiatorMode(MODE_OFF);
 }
 
 void checkEtat(){
