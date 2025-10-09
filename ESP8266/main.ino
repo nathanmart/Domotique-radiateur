@@ -152,6 +152,34 @@ PilotPinLevels levelsForMode(RadiatorMode mode) {
   }
 }
 
+void startAccessPoint();
+void stopAccessPoint();
+void setupServer();
+void handleRoot();
+void handleSave();
+void handleNotFound();
+bool handleCaptivePortal();
+void handleIdentify();
+void handleDeviceName();
+void handleMqttHost();
+bool loadConfig();
+void saveConfig(const DeviceConfig &data);
+bool connectToSavedWifi(bool blocking = false);
+bool ensureDeviceName();
+void refreshMqttClientId();
+bool isMqttConfigured();
+void configureMqttClient();
+void updateStatusLed();
+void setStatusLedPattern(LedPatternId pattern);
+void suspendStatusLed(bool suspend);
+bool attemptMqttReconnect(bool forceAttempt = false);
+void setBaseStatusLedPattern(LedPatternId pattern);
+void activateTemporaryLedPattern(LedPatternId pattern, unsigned long durationMs);
+void triggerStateChangeBlink();
+RadiatorMode detectCurrentMode();
+const char* modeToCommand(RadiatorMode mode);
+void registerAppliedMode(RadiatorMode mode);
+
 void persistAppliedMode(RadiatorMode mode, bool force = false) {
   uint8_t encodedMode = static_cast<uint8_t>(mode);
 
@@ -207,34 +235,6 @@ void applyRadiatorMode(RadiatorMode mode) {
   registerAppliedMode(mode);
   persistAppliedMode(mode);
 }
-
-void startAccessPoint();
-void stopAccessPoint();
-void setupServer();
-void handleRoot();
-void handleSave();
-void handleNotFound();
-bool handleCaptivePortal();
-void handleIdentify();
-void handleDeviceName();
-void handleMqttHost();
-bool loadConfig();
-void saveConfig(const DeviceConfig &data);
-bool connectToSavedWifi(bool blocking = false);
-bool ensureDeviceName();
-void refreshMqttClientId();
-bool isMqttConfigured();
-void configureMqttClient();
-void updateStatusLed();
-void setStatusLedPattern(LedPatternId pattern);
-void suspendStatusLed(bool suspend);
-bool attemptMqttReconnect(bool forceAttempt = false);
-void setBaseStatusLedPattern(LedPatternId pattern);
-void activateTemporaryLedPattern(LedPatternId pattern, unsigned long durationMs);
-void triggerStateChangeBlink();
-RadiatorMode detectCurrentMode();
-const char* modeToCommand(RadiatorMode mode);
-void registerAppliedMode(RadiatorMode mode);
 
 void applyLedState(bool on) {
   digitalWrite(LED_BUILTIN, on ? LED_ACTIVE_STATE : LED_INACTIVE_STATE);
