@@ -30,8 +30,9 @@ Ce firmware transforme l'ESP8266 en radiateur connecté piloté via MQTT. Il com
   une coupure de courant, l'ESP8266 restaure cette consigne sans passer par une séquence de clignotements parasites sur les
   fils `pinHigh`/`pinLow`.
 - Au démarrage, les broches de pilotage sont laissées en haute impédance puis configurées en sortie uniquement une fois que la
-  configuration a été relue. Cette précaution évite que le module ne reste bloqué si les broches sont déjà reliées au montage au
-  moment où l'alimentation 3,3&nbsp;V revient (cas typique après une coupure secteur sur le radiateur).
+  configuration a été relue **et** qu'un court délai de sécurité (~1,5&nbsp;s) s'est écoulé. Cette précaution évite que le module
+  ne reste bloqué si les broches sont déjà reliées au montage au moment où l'alimentation 3,3&nbsp;V revient (cas typique après une
+  coupure secteur sur le radiateur).
 - Les changements d'état sont enregistrés avec une temporisation minimale d'une seconde pour limiter l'usure de l'EEPROM tout en
   garantissant la reprise du dernier mode en cas de redémarrage brusque.
 

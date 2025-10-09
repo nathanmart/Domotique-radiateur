@@ -128,9 +128,13 @@ enum RadiatorMode : uint8_t {
 };
 
 RadiatorMode appliedMode = MODE_UNKNOWN;
+RadiatorMode pendingMode = MODE_UNKNOWN;
 unsigned long lastModePersist = 0;
+unsigned long pilotPinsActivationDeadline = 0;
+bool pilotPinsConfigured = false;
 
 const unsigned long MODE_PERSIST_MIN_INTERVAL = 1000;
+const unsigned long PILOT_PIN_ACTIVATION_DELAY_MS = 1500;
 
 struct PilotPinLevels {
   uint8_t highLevel;
@@ -179,6 +183,8 @@ void triggerStateChangeBlink();
 RadiatorMode detectCurrentMode();
 const char* modeToCommand(RadiatorMode mode);
 void registerAppliedMode(RadiatorMode mode);
+void ensureStartupModeApplied();
+void configurePilotPinsHighImpedance();
 
 void persistAppliedMode(RadiatorMode mode, bool force = false) {
   uint8_t encodedMode = static_cast<uint8_t>(mode);
@@ -202,10 +208,20 @@ void applyPinLevels(const PilotPinLevels &levels) {
   digitalWrite(pinLow, levels.lowLevel);
 }
 
+void configurePilotPinsHighImpedance() {
+  pinMode(pinHigh, INPUT);
+  digitalWrite(pinHigh, LOW);
+  pinMode(pinLow, INPUT);
+  digitalWrite(pinLow, LOW);
+}
+
 void setPilotPinsOutputs(const PilotPinLevels &levels) {
+  if (!pilotPinsConfigured) {
+    pinMode(pinHigh, OUTPUT);
+    pinMode(pinLow, OUTPUT);
+    pilotPinsConfigured = true;
+  }
   applyPinLevels(levels);
-  pinMode(pinHigh, OUTPUT);
-  pinMode(pinLow, OUTPUT);
 }
 
 RadiatorMode sanitizeMode(RadiatorMode mode) {
@@ -228,12 +244,35 @@ RadiatorMode restoreStoredMode() {
 }
 
 void applyRadiatorMode(RadiatorMode mode) {
-  PilotPinLevels levels = levelsForMode(mode);
-  applyPinLevels(levels);
-  pinMode(pinHigh, OUTPUT);
-  pinMode(pinLow, OUTPUT);
-  registerAppliedMode(mode);
-  persistAppliedMode(mode);
+  RadiatorMode sanitizedMode = sanitizeMode(mode);
+  pendingMode = sanitizedMode;
+
+  if (!pilotPinsConfigured) {
+    if ((long)(millis() - pilotPinsActivationDeadline) < 0) {
+      return;
+    }
+  }
+
+  PilotPinLevels levels = levelsForMode(sanitizedMode);
+  setPilotPinsOutputs(levels);
+  registerAppliedMode(sanitizedMode);
+  persistAppliedMode(sanitizedMode);
+}
+
+void ensureStartupModeApplied() {
+  if (pendingMode == MODE_UNKNOWN) {
+    return;
+  }
+
+  if (pilotPinsConfigured) {
+    return;
+  }
+
+  if ((long)(millis() - pilotPinsActivationDeadline) < 0) {
+    return;
+  }
+
+  applyRadiatorMode(pendingMode);
 }
 
 void applyLedState(bool on) {
@@ -354,6 +393,9 @@ RadiatorMode detectCurrentMode() {
   if (highState == LOW && lowState == HIGH) {
     return MODE_HORSGEL;
   }
+  if (!pilotPinsConfigured && pendingMode != MODE_UNKNOWN) {
+    return pendingMode;
+  }
   return MODE_UNKNOWN;
 }
 
@@ -385,6 +427,9 @@ void setup() {
   // Serial.begin(115200);
   // delay(10);
 
+  configurePilotPinsHighImpedance();
+  pilotPinsActivationDeadline = millis() + PILOT_PIN_ACTIVATION_DELAY_MS;
+
   EEPROM.begin(EEPROM_SIZE);
   credentialsLoaded = loadConfig();
   bool nameAssigned = ensureDeviceName();
@@ -393,8 +438,6 @@ void setup() {
     saveConfig(deviceConfig);
   }
 
-  pinMode(pinHigh, INPUT);
-  pinMode(pinLow, INPUT);
   pinMode(LED_BUILTIN, OUTPUT);
 
   RadiatorMode storedMode = restoreStoredMode();
@@ -402,9 +445,7 @@ void setup() {
     storedMode = detectCurrentMode();
   }
   storedMode = sanitizeMode(storedMode);
-  setPilotPinsOutputs(levelsForMode(storedMode));
-  appliedMode = storedMode;
-  persistAppliedMode(storedMode, true);
+  pendingMode = storedMode;
 
   setStatusLedPattern(LED_PATTERN_WIFI_CONNECTING);
   updateStatusLed();
@@ -425,6 +466,7 @@ void setup() {
 }
 
 void loop() {
+  ensureStartupModeApplied();
   updateStatusLed();
 
   server.handleClient();
