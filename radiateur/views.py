@@ -13,6 +13,7 @@ import http.client
 from pathlib import Path
 
 from django.conf import settings
+from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.views.decorators.cache import never_cache
@@ -185,6 +186,7 @@ def _validate_schedule(payload: object) -> dict[str, list[dict[str, str]]]:
 
 @csrf_exempt
 @never_cache
+@login_required
 def planning(request):
     """Render the planning page along with the JSON payload."""
 
@@ -214,6 +216,7 @@ def service_worker(request):
 
 
 @csrf_exempt
+@login_required
 def index(request):
     """Render the main dashboard page."""
 
@@ -238,6 +241,7 @@ def index(request):
 
 @csrf_exempt
 @never_cache
+@login_required
 def maj_json(request):
     """Persist the planning JSON received from the front-end."""
 
@@ -255,6 +259,7 @@ def maj_json(request):
 
 
 @csrf_exempt
+@login_required
 def changement_etat(request):
     """Handle state change requests sent from the UI."""
 
@@ -289,6 +294,7 @@ def changement_etat(request):
 
 
 @csrf_exempt
+@login_required
 def retourner_etat(request):
     """Return the latest device states after requesting them from MQTT."""
 
@@ -303,6 +309,7 @@ def retourner_etat(request):
 
 
 @csrf_exempt
+@login_required
 def options(request):
     """Display and update the options page allowing per-radiator overrides."""
 
@@ -654,6 +661,7 @@ def _push_mqtt_host(ip: str, host: str) -> bool:
 
 @csrf_exempt
 @never_cache
+@login_required
 def devices(request):
     """Manage ESP8266 registrations via the JSON registry."""
 
