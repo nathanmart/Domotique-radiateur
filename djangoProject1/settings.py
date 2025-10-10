@@ -57,6 +57,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'radiateur.middleware.LoginRequiredMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -140,6 +141,13 @@ MEDIA_ROOT = os.getenv("MEDIA_ROOT", os.path.join(BASE_DIR, "media"))
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "index"
 LOGOUT_REDIRECT_URL = "login"
+
+LOGIN_EXEMPT_URLS = (
+    "/login/",
+    "/logout/",
+    "/admin/*",
+    "/service-worker.js",
+)
 
 # Keep authenticated sessions active for a long period so users
 # do not need to sign in repeatedly.
