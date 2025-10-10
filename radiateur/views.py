@@ -12,6 +12,7 @@ from ipaddress import ip_address, ip_network
 import http.client
 from pathlib import Path
 
+from django.conf import settings
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.views.decorators.cache import never_cache
@@ -45,6 +46,7 @@ from .services import (
 )
 
 DATA_FILE_PATH = Path(__file__).resolve().parent / "templates" / "data.json"
+SERVICE_WORKER_PATH = Path(settings.BASE_DIR) / "static" / "js" / "service-worker.js"
 
 WEEKDAYS = (
     "monday",
@@ -189,6 +191,26 @@ def planning(request):
     enregistrer_log("Requete page 'planning'")
     data = _load_schedule()
     return render(request, "planning.html", {"data": json.dumps(data, ensure_ascii=False)})
+
+
+@never_cache
+def service_worker(request):
+    """Serve the service worker script from the project root."""
+
+    if not SERVICE_WORKER_PATH.exists():
+        return HttpResponse(
+            "// Service worker introuvable",
+            content_type="application/javascript",
+            status=404,
+        )
+
+    response = HttpResponse(
+        SERVICE_WORKER_PATH.read_text(encoding="utf-8"),
+        content_type="application/javascript",
+    )
+    response["Service-Worker-Allowed"] = "/"
+    response["Cache-Control"] = "no-store"
+    return response
 
 
 @csrf_exempt
