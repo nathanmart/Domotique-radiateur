@@ -51,6 +51,12 @@ python manage.py migrate
 python manage.py createsuperuser
 ```
 
+Utilisez ensuite ce compte pour vous connecter à l'interface Web via
+`http://<IP_du_Pi>:8000/login/`. Une session reste active pendant 30 jours et
+est prolongée automatiquement à chaque visite, ce qui évite d'avoir à se
+réauthentifier à chaque utilisation. Pensez à vous déconnecter depuis le menu
+"Déconnexion" si vous utilisez un appareil partagé.
+
 ## 6. Démarrage du courtier Mosquitto
 Le paquet `mosquitto` installe un service systemd. Pour le démarrer et l'activer au démarrage :
 ```bash
