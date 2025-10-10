@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import math
 import socket
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from ipaddress import ip_address, ip_network
@@ -223,6 +222,7 @@ def index(request):
     enregistrer_log("Requete page 'index'")
     radiators = get_all_radiator_names()
     disabled_states = load_disabled_states()
+    cached_states = get_cached_states()
     radiator_cards: list[tuple[str, bool]] = []
     has_active_radiators = False
     for radiator in radiators:
@@ -233,6 +233,7 @@ def index(request):
     context = {
         "radiators": radiators,
         "disabled_states": disabled_states,
+        "initial_states": cached_states,
         "radiator_cards": radiator_cards,
         "has_active_radiators": has_active_radiators,
     }
@@ -303,8 +304,7 @@ def retourner_etat(request):
         enregistrer_log("Impossible de retourner l'état: client MQTT indisponible")
         return JsonResponse({"states": get_cached_states(), "disabled": load_disabled_states()})
 
-    demander_etat_au_appareil(client)
-    time.sleep(0.05)
+    demander_etat_au_appareil(client, timeout=0.6)
     return JsonResponse({"states": get_cached_states(), "disabled": load_disabled_states()})
 
 

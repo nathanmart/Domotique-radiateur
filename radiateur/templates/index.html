@@ -27,6 +27,7 @@
 
 {{ radiators|json_script:'radiator-list' }}
 {{ disabled_states|json_script:'radiator-disabled' }}
+{{ initial_states|json_script:'radiator-states' }}
 
 <div class="container-fluid main-panel py-3">
     <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-3">
@@ -109,6 +110,7 @@
 <script>
     const radiators = JSON.parse(document.getElementById('radiator-list').textContent || '[]');
     const disabledInitial = JSON.parse(document.getElementById('radiator-disabled').textContent || '{}');
+    const statesInitial = JSON.parse(document.getElementById('radiator-states').textContent || '{}');
     const iconCache = {};
     document.querySelectorAll('.image-cache').forEach((element) => {
         iconCache[element.dataset.mode] = element.dataset.imageUrl;
@@ -338,7 +340,7 @@
         window.location.href = '/options/';
     });
 
-    applyStateSnapshot({}, disabledStates);
+    applyStateSnapshot(statesInitial, disabledStates);
     demanderEtat();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>

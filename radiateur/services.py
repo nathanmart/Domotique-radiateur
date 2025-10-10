@@ -281,7 +281,12 @@ def boucle_demander_etat_appareil(
         time.sleep(delai)
 
 
-def demander_etat_au_appareil(mqtt_client, nb_try: int = 1, liste_radiateur: Iterable[str] | None = None):
+def demander_etat_au_appareil(
+    mqtt_client,
+    nb_try: int = 1,
+    liste_radiateur: Iterable[str] | None = None,
+    timeout: float = 2.0,
+):
     """Request the state of each radiator and update the shared cache."""
 
     if not mqtt_client:
@@ -331,10 +336,12 @@ def demander_etat_au_appareil(mqtt_client, nb_try: int = 1, liste_radiateur: Ite
         if all(reponse_obtenu.values()):
             return 1
 
-        if time.time() - start_time > 2:
-            liste_radiateur_sans_retour = [cle for cle, value in reponse_obtenu.items() if not value]
+        if time.time() - start_time > timeout:
+            liste_radiateur_sans_retour = [
+                cle for cle, value in reponse_obtenu.items() if not value
+            ]
             return demander_etat_au_appareil(
-                mqtt_client, nb_try + 1, liste_radiateur_sans_retour
+                mqtt_client, nb_try + 1, liste_radiateur_sans_retour, timeout
             )
 
         old_nb_message = new_nb_message
