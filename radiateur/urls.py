@@ -1,4 +1,4 @@
-from django.urls import path, include
+from django.urls import path
 
 from . import views
 
@@ -11,5 +11,6 @@ urlpatterns = [
     path("devices/", views.devices, name="devices"),
     # path("getjson/", views.getjson, name="datajson"),
     path("maj_json", views.maj_json, name="maj_json"),
+    path("service-worker.js", views.service_worker, name="service-worker"),
     # path("get_image_url/", views.get_image_url, name="get_image_url")
 ]
