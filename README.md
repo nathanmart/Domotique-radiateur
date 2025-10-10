@@ -98,8 +98,13 @@ comme proxy inverse.
 
 ### 10.1 Installation des paquets nécessaires
 
+Installez Nginx via `apt` et ajoutez Gunicorn dans votre environnement virtuel afin qu'il
+utilise exactement les mêmes dépendances Python que votre projet :
+
 ```bash
-sudo apt install -y gunicorn nginx
+sudo apt install -y nginx
+source /home/nathan/Domotique-radiateur/.venv/bin/activate
+pip install gunicorn
 ```
 
 Si le service Mosquitto n'était pas encore activé, vérifiez son état et activez-le pour un
@@ -122,22 +127,31 @@ After=network.target mosquitto.service
 Requires=mosquitto.service
 
 [Service]
-User=pi
+User=nathan
 Group=www-data
-WorkingDirectory=/home/pi/Domotique-radiateur
-Environment="PATH=/home/pi/Domotique-radiateur/.venv/bin"
-EnvironmentFile=/home/pi/Domotique-radiateur/.env
-ExecStart=/home/pi/Domotique-radiateur/.venv/bin/gunicorn \
+WorkingDirectory=/home/nathan/Domotique-radiateur
+Environment="PATH=/home/nathan/Domotique-radiateur/.venv/bin"
+EnvironmentFile=/home/nathan/Domotique-radiateur/.env
+ExecStart=/home/nathan/Domotique-radiateur/.venv/bin/gunicorn \
     --workers 3 \
-    --bind unix:/run/gunicorn-domotique.sock \
+    --bind unix:/run/gunicorn/gunicorn-domotique.sock \
     djangoProject1.wsgi:application
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-> Remplacez `pi` par l'utilisateur système approprié si besoin et vérifiez le chemin du module
-> WSGI (`djangoProject1.wsgi`).
+> Adaptez `User`, `WorkingDirectory` et les chemins au compte système qui possède le
+> projet. Le chemin WSGI (`djangoProject1.wsgi`) reste identique.
+
+Créez le dossier du socket Unix avant de démarrer le service afin d'éviter les erreurs de
+permission :
+
+```bash
+sudo mkdir -p /run/gunicorn
+sudo chown nathan:www-data /run/gunicorn
+sudo chmod 775 /run/gunicorn
+```
 
 Ensuite, rechargez systemd et démarrez le service :
 
@@ -162,12 +176,12 @@ server {
 
     location = /favicon.ico { access_log off; log_not_found off; }
     location /static/ {
-        alias /home/pi/Domotique-radiateur/static/;
+        alias /home/nathan/Domotique-radiateur/static/;
     }
 
     location / {
         include proxy_params;
-        proxy_pass http://unix:/run/gunicorn-domotique.sock;
+        proxy_pass http://unix:/run/gunicorn/gunicorn-domotique.sock;
     }
 }
 ```
