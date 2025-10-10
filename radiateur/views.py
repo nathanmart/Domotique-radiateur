@@ -223,6 +223,7 @@ def index(request):
     enregistrer_log("Requete page 'index'")
     radiators = get_all_radiator_names()
     disabled_states = load_disabled_states()
+    cached_states = get_cached_states()
     radiator_cards: list[tuple[str, bool]] = []
     has_active_radiators = False
     for radiator in radiators:
@@ -233,6 +234,7 @@ def index(request):
     context = {
         "radiators": radiators,
         "disabled_states": disabled_states,
+        "initial_states": cached_states,
         "radiator_cards": radiator_cards,
         "has_active_radiators": has_active_radiators,
     }
