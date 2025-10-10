@@ -90,6 +90,121 @@ Ce script utilise les mêmes variables d'environnement pour publier des messages
 
 Ce guide couvre l'essentiel pour démarrer rapidement le projet sur un Raspberry Pi.
 
+## 10. Déploiement en production avec Gunicorn et Nginx
+
+Les sections précédentes permettent de lancer le serveur en mode développement. Pour une mise
+en production durable, nous allons utiliser Gunicorn comme serveur d'application WSGI et Nginx
+comme proxy inverse.
+
+### 10.1 Installation des paquets nécessaires
+
+Installez Nginx via `apt` et ajoutez Gunicorn dans votre environnement virtuel afin qu'il
+utilise exactement les mêmes dépendances Python que votre projet :
+
+```bash
+sudo apt install -y nginx
+source /home/nathan/Domotique-radiateur/.venv/bin/activate
+pip install gunicorn
+```
+
+Si le service Mosquitto n'était pas encore activé, vérifiez son état et activez-le pour un
+redémarrage automatique :
+
+```bash
+sudo systemctl enable mosquitto
+sudo systemctl start mosquitto
+```
+
+### 10.2 Service systemd pour Gunicorn
+
+Créez un fichier `/etc/systemd/system/gunicorn.service` avec le contenu suivant (adaptez les
+chemins si nécessaire) :
+
+```ini
+[Unit]
+Description=Gunicorn daemon for Domotique-radiateur
+After=network.target mosquitto.service
+Requires=mosquitto.service
+
+[Service]
+User=nathan
+Group=www-data
+WorkingDirectory=/home/nathan/Domotique-radiateur
+Environment="PATH=/home/nathan/Domotique-radiateur/.venv/bin"
+EnvironmentFile=/home/nathan/Domotique-radiateur/.env
+ExecStart=/home/nathan/Domotique-radiateur/.venv/bin/gunicorn \
+    --workers 3 \
+    --bind unix:/run/gunicorn/gunicorn-domotique.sock \
+    djangoProject1.wsgi:application
+
+[Install]
+WantedBy=multi-user.target
+```
+
+> Adaptez `User`, `WorkingDirectory` et les chemins au compte système qui possède le
+> projet. Le chemin WSGI (`djangoProject1.wsgi`) reste identique.
+
+Créez le dossier du socket Unix avant de démarrer le service afin d'éviter les erreurs de
+permission :
+
+```bash
+sudo mkdir -p /run/gunicorn
+sudo chown nathan:www-data /run/gunicorn
+sudo chmod 775 /run/gunicorn
+```
+
+Ensuite, rechargez systemd et démarrez le service :
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable gunicorn
+sudo systemctl start gunicorn
+sudo systemctl status gunicorn
+```
+
+La section `[Unit]` garantit que Mosquitto est lancé avant Gunicorn afin que les connexions MQTT
+du projet soient immédiatement disponibles.
+
+### 10.3 Configuration de Nginx
+
+Créez un fichier `/etc/nginx/sites-available/domotique` :
+
+```nginx
+server {
+    listen 80;
+    server_name domotique.local <IP_du_Pi>;
+
+    location = /favicon.ico { access_log off; log_not_found off; }
+    location /static/ {
+        alias /home/nathan/Domotique-radiateur/static/;
+    }
+
+    location / {
+        include proxy_params;
+        proxy_pass http://unix:/run/gunicorn/gunicorn-domotique.sock;
+    }
+}
+```
+
+Activez le site et testez la configuration :
+
+```bash
+sudo ln -s /etc/nginx/sites-available/domotique /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl restart nginx
+```
+
+Nginx redirigera désormais les requêtes HTTP vers Gunicorn, qui fera tourner l'application Django.
+Vérifiez l'état des services critiques :
+
+```bash
+sudo systemctl status mosquitto
+sudo systemctl status gunicorn
+sudo systemctl status nginx
+```
+
+> En cas de modification du code, rechargez Gunicorn avec `sudo systemctl restart gunicorn`.
+
 ## Indicateurs lumineux de l'ESP8266
 
 L'ESP8266 embarque un indicateur lumineux intégré (LED) configuré dans `ESP8266/main.ino`.
